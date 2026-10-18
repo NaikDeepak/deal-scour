@@ -9,6 +9,13 @@ def test_load_seed_catalog() -> None:
     ids = [listing.id for listing in listings]
     assert len(set(ids)) == 28
 
+    product_keys = {listing.product_key for listing in listings}
+    assert len(product_keys) == 22
+
+    family_keys = {listing.family_key for listing in listings}
+    assert len(family_keys) == 15
+    assert all(listing.family_key != "" for listing in listings)
+
     valid_platforms = {"amazon", "flipkart", "blinkit", "instamart", "zepto"}
     for listing in listings:
         assert listing.platform in valid_platforms
@@ -20,7 +27,8 @@ def test_load_seed_catalog() -> None:
 def test_wal_1_product_key() -> None:
     listings = load_seed()
     wal_1 = next(item for item in listings if item.id == "wal-1")
-    assert wal_1.product_key == "nutraj_walnuts"
+    assert wal_1.product_key == "nutraj_walnuts_500g"
+    assert wal_1.family_key == "walnuts"
 
 
 def test_seed_listing_item_price() -> None:

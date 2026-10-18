@@ -16,6 +16,7 @@ _VALID_SORTS: set[str] = {"unit_rate", "price", "discount", "eta"}
 class DealOut(BaseModel):
     id: str
     product_key: str
+    family_key: str
     category: str
     title: str
     brand: str
@@ -37,6 +38,7 @@ class DealOut(BaseModel):
     eta_minutes: int
     is_instant: bool
     is_best_in_product: bool
+    is_best_in_family: bool
 
 
 class DealsResponse(BaseModel):
@@ -49,6 +51,7 @@ def get_deals(
     members: str = Query("amazon,instamart,flipkart"),
     category: str | None = Query(None),
     platform: str | None = Query(None),
+    family: str | None = Query(None),
     q: str | None = Query(None),
     sort: str = Query("unit_rate"),
 ) -> DealsResponse:
@@ -75,6 +78,7 @@ def get_deals(
     # Compute deals for all listings
     computed_deals: list[DealOut] = []
     min_rate_by_product: dict[str, int] = {}
+    min_rate_by_family: dict[str, int] = {}
 
     for listing in listings:
         is_mem = listing.platform in active_members
@@ -99,9 +103,16 @@ def get_deals(
         ):
             min_rate_by_product[listing.product_key] = ur
 
+        if (
+            listing.family_key not in min_rate_by_family
+            or ur < min_rate_by_family[listing.family_key]
+        ):
+            min_rate_by_family[listing.family_key] = ur
+
         deal = DealOut(
             id=listing.id,
             product_key=listing.product_key,
+            family_key=listing.family_key,
             category=listing.category,
             title=listing.title,
             brand=listing.brand,
@@ -123,13 +134,16 @@ def get_deals(
             eta_minutes=listing.eta_minutes,
             is_instant=listing.is_instant,
             is_best_in_product=False,  # Updated in second pass
+            is_best_in_family=False,  # Updated in second pass
         )
         computed_deals.append(deal)
 
-    # Set is_best_in_product based on global minimum per product_key
+    # Set is_best_in_product and is_best_in_family based on global minimums
     for deal in computed_deals:
         if deal.unit_rate_paise == min_rate_by_product[deal.product_key]:
             deal.is_best_in_product = True
+        if deal.unit_rate_paise == min_rate_by_family[deal.family_key]:
+            deal.is_best_in_family = True
 
     # Filtering
     filtered_deals = computed_deals
@@ -137,6 +151,8 @@ def get_deals(
         filtered_deals = [d for d in filtered_deals if d.category == category]
     if platform is not None:
         filtered_deals = [d for d in filtered_deals if d.platform == platform]
+    if family is not None:
+        filtered_deals = [d for d in filtered_deals if d.family_key == family]
     if q is not None:
         q_lower = q.lower()
         filtered_deals = [

@@ -16,7 +16,7 @@ def test_deals_router_is_mounted() -> None:
 
 
 def test_plans_router_is_mounted() -> None:
-    body = {"needs": [{"line_id": "atta", "product_key": "aashirvaad_atta", "qty": 1}]}
+    body = {"needs": [{"line_id": "atta", "product_key": "aashirvaad_select_atta_5kg", "qty": 1}]}
     res = TestClient(app).post("/api/v1/plans", json=body)
     assert res.status_code == 200
     assert res.json()["plans"][0]["label"] == "cheapest_now"

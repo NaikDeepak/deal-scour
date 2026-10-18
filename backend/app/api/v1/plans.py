@@ -1,3 +1,4 @@
+import math
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
@@ -16,6 +17,7 @@ from app.optimizer.planning import Candidate, NeedLine, Plan
 from app.optimizer.planset import PlanLabel, PlanSet, plan
 from app.pricing.fee_schedules import Platform
 from app.pricing.landed import unit_price
+from app.pricing.units import parse_pack
 
 router = APIRouter()
 
@@ -28,7 +30,9 @@ _DEFAULT_MEMBERS: list[Platform] = ["amazon", "instamart", "flipkart"]
 
 class NeedIn(BaseModel):
     line_id: str
-    product_key: str
+    product_key: str | None = None
+    family_key: str | None = None
+    quantity: str | None = None
     qty: int = Field(default=1, ge=1, le=99)
     need_by_minutes: int | None = None
     lock_platform: Platform | None = None
@@ -87,8 +91,9 @@ class OrderLineOut(BaseModel):
     listing_id: str
     title: str
     pack_label: str
+    packs: int
     unit_price_paise: Paise
-    qty: int
+    line_total_paise: Paise
     is_filler: bool
 
 
@@ -137,6 +142,8 @@ def _build_plan_out(
     p: Plan,
     seed_by_id: dict[str, SeedListing],
     filler_ids: set[str],
+    memberships: dict[Platform, bool],
+    line_packs: dict[tuple[str, str], int],
     pending: tuple[PendingOrder, ...] = (),
 ) -> PlanOut:
     pending_by_order_idx = {pend.order_index: pend for pend in pending}
@@ -153,15 +160,24 @@ def _build_plan_out(
         lines_out: list[OrderLineOut] = []
         for pline in order_lines:
             listing = seed_by_id[pline.listing_id]
+            is_filler = pline.line_id in filler_ids
+            packs = (
+                1
+                if is_filler
+                else line_packs.get((pline.line_id, pline.listing_id), pline.qty)
+            )
+
+            single_pack_price = unit_price(listing.item_price(), memberships[listing.platform])
             lines_out.append(
                 OrderLineOut(
                     line_id=pline.line_id,
                     listing_id=pline.listing_id,
                     title=listing.title,
                     pack_label=listing.pack_label,
-                    unit_price_paise=pline.unit_price,
-                    qty=pline.qty,
-                    is_filler=pline.line_id in filler_ids,
+                    packs=packs,
+                    unit_price_paise=single_pack_price,
+                    line_total_paise=single_pack_price * packs,
+                    is_filler=is_filler,
                 )
             )
 
@@ -222,12 +238,15 @@ def post_plans(req: PlansRequest) -> PlansResponse:
     listings = load_seed()
     seed_by_id: dict[str, SeedListing] = {item.id: item for item in listings}
     seed_by_product: dict[str, list[SeedListing]] = {}
+    seed_by_family: dict[str, list[SeedListing]] = {}
     for item in listings:
         seed_by_product.setdefault(item.product_key, []).append(item)
+        seed_by_family.setdefault(item.family_key, []).append(item)
 
     # 2. Build needs
     seen_line_ids: set[str] = set()
     opt_needs: list[NeedLine] = []
+    line_packs: dict[tuple[str, str], int] = {}
 
     try:
         for need in req.needs:
@@ -238,30 +257,90 @@ def post_plans(req: PlansRequest) -> PlansResponse:
                 raise ValueError(f"Duplicate line_id: {need.line_id}")
             seen_line_ids.add(need.line_id)
 
-            if need.product_key not in seed_by_product:
-                raise ValueError(f"Unknown product_key: {need.product_key}")
-
-            prod_listings = seed_by_product[need.product_key]
-            candidates = [
-                Candidate(
-                    listing_id=item.id,
-                    platform=item.platform,
-                    unit_price=unit_price(item.item_price(), memberships[item.platform]),
-                    eta_minutes=item.eta_minutes,
+            has_pk = need.product_key is not None
+            has_fk = need.family_key is not None
+            if (has_pk and has_fk) or (not has_pk and not has_fk):
+                raise ValueError(
+                    f"Line {need.line_id}: exactly one of product_key or family_key must be set"
                 )
-                for item in prod_listings
-            ]
 
-            opt_needs.append(
-                NeedLine(
-                    line_id=need.line_id,
-                    category=prod_listings[0].category,
-                    qty=need.qty,
-                    candidates=tuple(candidates),
-                    need_by_minutes=need.need_by_minutes,
-                    lock_platform=need.lock_platform,
+            if has_pk:
+                assert need.product_key is not None
+                if need.quantity is not None:
+                    raise ValueError(
+                        f"Line {need.line_id}: quantity must be null for exact product needs"
+                    )
+                if need.product_key not in seed_by_product:
+                    raise ValueError(f"Unknown product_key: {need.product_key}")
+
+                prod_listings = seed_by_product[need.product_key]
+                candidates = [
+                    Candidate(
+                        listing_id=item.id,
+                        platform=item.platform,
+                        unit_price=unit_price(item.item_price(), memberships[item.platform]),
+                        eta_minutes=item.eta_minutes,
+                    )
+                    for item in prod_listings
+                ]
+                for item in prod_listings:
+                    line_packs[(need.line_id, item.id)] = need.qty
+
+                opt_needs.append(
+                    NeedLine(
+                        line_id=need.line_id,
+                        category=prod_listings[0].category,
+                        qty=need.qty,
+                        candidates=tuple(candidates),
+                        need_by_minutes=need.need_by_minutes,
+                        lock_platform=need.lock_platform,
+                    )
                 )
-            )
+            else:
+                assert need.family_key is not None
+                if need.quantity is None:
+                    raise ValueError(
+                        f"Line {need.line_id}: quantity is required for flexible family needs"
+                    )
+                if need.family_key not in seed_by_family:
+                    raise ValueError(f"Unknown family_key: {need.family_key}")
+
+                parsed_pack = parse_pack(need.quantity)
+                target = parsed_pack.qty * need.qty
+
+                family_listings = seed_by_family[need.family_key]
+                matching_listings = [
+                    item for item in family_listings if item.pack.unit == parsed_pack.unit
+                ]
+                if not matching_listings:
+                    raise ValueError(
+                        f"No listings in family '{need.family_key}' match unit '{parsed_pack.unit}'"
+                    )
+
+                candidates = []
+                for item in matching_listings:
+                    packs = math.ceil(target / item.pack.qty)
+                    line_packs[(need.line_id, item.id)] = packs
+                    base_up = unit_price(item.item_price(), memberships[item.platform])
+                    candidates.append(
+                        Candidate(
+                            listing_id=item.id,
+                            platform=item.platform,
+                            unit_price=base_up * packs,
+                            eta_minutes=item.eta_minutes,
+                        )
+                    )
+
+                opt_needs.append(
+                    NeedLine(
+                        line_id=need.line_id,
+                        category=matching_listings[0].category,
+                        qty=1,
+                        candidates=tuple(candidates),
+                        need_by_minutes=need.need_by_minutes,
+                        lock_platform=need.lock_platform,
+                    )
+                )
 
         # 3. Build offers
         opt_offers: list[Offer] = []
@@ -345,6 +424,8 @@ def post_plans(req: PlansRequest) -> PlansResponse:
         p=planset.baseline,
         seed_by_id=seed_by_id,
         filler_ids=filler_ids,
+        memberships=memberships,
+        line_packs=line_packs,
         pending=(),
     )
 
@@ -354,6 +435,8 @@ def post_plans(req: PlansRequest) -> PlansResponse:
             p=lp.plan,
             seed_by_id=seed_by_id,
             filler_ids=filler_ids,
+            memberships=memberships,
+            line_packs=line_packs,
             pending=lp.pending,
         )
         reasons_out = [

@@ -55,32 +55,80 @@ def test_deals_item_checks() -> None:
 
 
 def test_best_in_product() -> None:
-    # Test 9: Best per product
+    # Test 9: Best per product and family
     resp = client.get("/api/v1/deals")
     deals = {d["id"]: d for d in resp.json()["deals"]}
 
-    # among aashirvaad_atta, only stp-1 has is_best_in_product
-    atta_deals = [d for d in resp.json()["deals"] if d["product_key"] == "aashirvaad_atta"]
+    # among aashirvaad_select_atta_5kg, only stp-1 has is_best_in_product
+    atta_deals = [d for d in resp.json()["deals"] if d["product_key"] == "aashirvaad_select_atta_5kg"]
     best_atta = [d["id"] for d in atta_deals if d["is_best_in_product"]]
     assert best_atta == ["stp-1"]
 
-    # among california_almonds, alm-1 is best with unit_rate_paise == 6190 and label "100g".
+    # among almonds family, alm-1 is best with unit_rate_paise == 6190 and label "100g".
     # alm-2 -> 8000, alm-3 -> 8300.
     alm_1 = deals["alm-1"]
+    assert alm_1["is_best_in_family"] is True
     assert alm_1["is_best_in_product"] is True
     assert alm_1["unit_rate_paise"] == 6190
     assert alm_1["rate_basis_label"] == "100g"
 
     alm_2 = deals["alm-2"]
     assert alm_2["unit_rate_paise"] == 8000
-    assert alm_2["is_best_in_product"] is False
+    assert alm_2["is_best_in_family"] is False
+    assert alm_2["is_best_in_product"] is True
 
     alm_3 = deals["alm-3"]
     assert alm_3["unit_rate_paise"] == 8300
-    assert alm_3["is_best_in_product"] is False
+    assert alm_3["is_best_in_family"] is False
+    assert alm_3["is_best_in_product"] is True
 
     # wal-1 is best of its own product
     assert deals["wal-1"]["is_best_in_product"] is True
+    assert deals["wal-1"]["is_best_in_family"] is True
+
+
+def test_deals_family_filter_and_best_in_family() -> None:
+    # Test case 2: GET /deals?family=sunflower_oil -> 3 deals (stp-4, stp-5, stp-6).
+    # Only stp-4 has is_best_in_family (13300/L vs 13540, 14200).
+    # stp-6 has is_best_in_product (the only 1 L listing).
+    resp = client.get("/api/v1/deals?family=sunflower_oil")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["count"] == 3
+    deals_by_id = {d["id"]: d for d in data["deals"]}
+    assert set(deals_by_id.keys()) == {"stp-4", "stp-5", "stp-6"}
+
+    assert deals_by_id["stp-4"]["unit_rate_paise"] == 13300
+    assert deals_by_id["stp-4"]["is_best_in_family"] is True
+    assert deals_by_id["stp-4"]["is_best_in_product"] is True
+
+    assert deals_by_id["stp-5"]["unit_rate_paise"] == 13540
+    assert deals_by_id["stp-5"]["is_best_in_family"] is False
+    assert deals_by_id["stp-5"]["is_best_in_product"] is False
+
+    assert deals_by_id["stp-6"]["unit_rate_paise"] == 14200
+    assert deals_by_id["stp-6"]["is_best_in_family"] is False
+    assert deals_by_id["stp-6"]["is_best_in_product"] is True
+
+
+def test_default_deals_best_in_product_exactly_one_per_product() -> None:
+    # Test case 3: Default GET /deals: is_best_in_product is true for exactly one listing
+    # per product_key, except exact ties.
+    resp = client.get("/api/v1/deals")
+    assert resp.status_code == 200
+    deals = resp.json()["deals"]
+
+    from collections import defaultdict
+    from typing import Any
+
+    deals_by_pk: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for d in deals:
+        deals_by_pk[d["product_key"]].append(d)
+
+    assert len(deals_by_pk) == 22
+    for pk, pk_deals in deals_by_pk.items():
+        best_count = sum(1 for d in pk_deals if d["is_best_in_product"])
+        assert best_count == 1, f"Expected 1 best for {pk}, got {best_count}"
 
 
 def test_regression_d4_d15_no_delivery_in_unit_price() -> None:
