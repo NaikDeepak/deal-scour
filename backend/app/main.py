@@ -5,7 +5,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import IntegrityError
 
-from app.api.v1 import auth, baskets, deals, households, lists, offers, plans, prices
+from app.api.v1 import auth, baskets, deals, households, listings, lists, offers, plans, prices
 from app.core.config import get_settings
 from app.core.security import verify_csrf
 
@@ -14,7 +14,7 @@ app = FastAPI(title="DealScour", version="0.1.0")
 # through current_household_id; tests/test_auth_coverage.py walks every route to prove nothing is left open.
 _csrf = [Depends(verify_csrf)]
 for _router in (auth.router, households.router, deals.router, plans.router, lists.router, offers.router,
-                baskets.router, prices.router):
+                baskets.router, prices.router, listings.router):
     app.include_router(_router, prefix="/api/v1", dependencies=_csrf)
 
 

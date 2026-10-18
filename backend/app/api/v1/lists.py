@@ -296,6 +296,8 @@ def create_need(
             quantity=req.quantity,
             qty=req.qty,
             line_id=req.line_id,
+            session=session,
+            household_id=household_id,
         )
     except ValueError as e:
         raise HTTPException(
@@ -395,6 +397,8 @@ def update_need(
             quantity=new_quantity,
             qty=new_qty,
             line_id=new_line_id,
+            session=session,
+            household_id=household_id,
         )
     except ValueError as e:
         raise HTTPException(

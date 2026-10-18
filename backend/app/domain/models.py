@@ -231,3 +231,41 @@ class Invite(SQLModel, table=True):
     used_at: datetime | None = Field(default=None)
 
 
+class CustomListing(SQLModel, table=True):
+    __tablename__ = "custom_listing"
+    __table_args__ = (
+        Index(
+            "ix_custom_listing_household_platform_sku_active",
+            "household_id",
+            "platform",
+            "sku",
+            unique=True,
+            sqlite_where=text("archived = 0"),
+        ),
+        Index(
+            "ix_custom_listing_household_product_key",
+            "household_id",
+            "product_key",
+            unique=True,
+        ),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    household_id: int = Field(foreign_key="household.id")
+    listing_id: str = Field(unique=True, index=True)
+    platform: str
+    sku: str
+    url: str
+    title: str = Field(min_length=1, max_length=120)
+    brand: str = Field(min_length=1, max_length=40)
+    pack_label: str
+    category: str = Field(min_length=1, max_length=30)
+    product_key: str = Field(min_length=1, max_length=60, index=True)
+    family_key: str = Field(min_length=1, max_length=40, index=True)
+    icon: str = Field(default="🛒")
+    archived: bool = Field(default=False)
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC)
+    )
+
+

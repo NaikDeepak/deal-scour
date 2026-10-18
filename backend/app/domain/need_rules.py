@@ -2,7 +2,9 @@ import json
 from collections.abc import Sequence
 from typing import Any, cast
 
-from app.domain.catalog import SeedListing, load_seed
+from sqlmodel import Session
+
+from app.domain.catalog import SeedListing, all_listings, load_seed
 from app.domain.models import Offer as OfferModel
 from app.optimizer.contract import Offer as OptimizerOffer
 from app.optimizer.contract import OfferKind, ValueType
@@ -20,6 +22,8 @@ def validate_need(
     qty: int,
     catalog: Sequence[SeedListing] | None = None,
     line_id: str | None = None,
+    session: Session | None = None,
+    household_id: int | None = None,
 ) -> None:
     if qty < 1 or qty > 99:
         raise ValueError(f"qty must be 1..99, got {qty}")
@@ -33,7 +37,11 @@ def validate_need(
         )
 
     if catalog is None:
-        catalog = load_seed()
+        if session is not None and household_id is not None:
+            catalog = all_listings(session=session, household_id=household_id)
+        else:
+            catalog = load_seed()
+
 
     seed_by_product = {item.product_key: item for item in catalog}
     seed_by_family: dict[str, list[SeedListing]] = {}
