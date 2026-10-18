@@ -419,7 +419,8 @@ def place_basket(
         raise HTTPException(status_code=404, detail="Basket not found")
 
     if basket.status == "ready":
-        pass
+        if req.without_offer:
+            basket.offer_value_expected_paise = 0
     elif basket.status == "pending":
         if not req.without_offer:
             raise HTTPException(
@@ -565,6 +566,14 @@ def add_basket_line(
         raise HTTPException(
             status_code=422,
             detail=f"Listing not found: {req.listing_id}",
+        )
+
+    if listing.platform != basket.platform:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Listing platform '{listing.platform}' does not match basket platform '{basket.platform}'"
+            ),
         )
 
     plan_run = session.get(PlanRun, basket.plan_run_id)

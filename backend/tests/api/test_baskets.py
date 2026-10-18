@@ -711,3 +711,139 @@ def test_10_get_baskets_list_and_detail(baskets_client: TestClient) -> None:
 
     # Unknown basket -> 404
     assert baskets_client.get("/api/v1/baskets/999999").status_code == 404
+
+
+def test_12_place_ready_basket_without_offer(baskets_client: TestClient) -> None:
+    # (12) POST /baskets/{id}/place with without_offer:true on a READY basket must also
+    # set offer_value_expected_paise=0 and not decrement uses.
+    r_list = baskets_client.post(
+        "/api/v1/lists", json={"name": "Ready Without Offer", "kind": "quick"}
+    )
+    list_id = r_list.json()["id"]
+
+    baskets_client.post(
+        f"/api/v1/lists/{list_id}/needs",
+        json={
+            "line_id": "oil",
+            "product_key": "fortune_sunlite_oil_5l",
+            "qty": 1,
+            "lock_platform": "amazon",
+        },
+    )
+
+    baskets_client.post(
+        "/api/v1/offers",
+        json={
+            "code": "A1",
+            "platform": "amazon",
+            "kind": "flat",
+            "min_order_paise": 50000,
+            "value_paise": 5000,
+            "uses_left": 2,
+        },
+    )
+
+    r_plan = baskets_client.post(f"/api/v1/lists/{list_id}/plan", json={})
+    plan_run_id = r_plan.json()["plan_run_id"]
+
+    r_acc = baskets_client.post(
+        f"/api/v1/plan-runs/{plan_run_id}/accept",
+        json={"label": "cheapest_now"},
+    )
+    baskets = r_acc.json()
+    ready_basket = next(b for b in baskets if b["status"] == "ready")
+    assert ready_basket["offer_value_expected_paise"] > 0
+    basket_id = ready_basket["id"]
+
+    # Place with without_offer: true
+    r_place = baskets_client.post(
+        f"/api/v1/baskets/{basket_id}/place",
+        json={"actual_paid_paise": 61500, "without_offer": True},
+    )
+    assert r_place.status_code == 200, r_place.text
+    placed_b = r_place.json()
+    assert placed_b["status"] == "placed"
+    assert placed_b["offer_value_expected_paise"] == 0
+
+    # Offer A1 uses_left remains 2
+    r_offers = baskets_client.get("/api/v1/offers")
+    a1_off = next(o for o in r_offers.json() if o["code"] == "A1")
+    assert a1_off["uses_left"] == 2
+
+
+def test_13_add_line_rejects_different_platform(baskets_client: TestClient) -> None:
+    # (13) POST /baskets/{id}/lines must reject a listing whose platform
+    # differs from the basket platform -> 422.
+    r_list = baskets_client.post(
+        "/api/v1/lists", json={"name": "Pending List Diff Plat", "kind": "monthly"}
+    )
+    list_id = r_list.json()["id"]
+
+    baskets_client.post(
+        f"/api/v1/lists/{list_id}/needs",
+        json={
+            "line_id": "oil",
+            "product_key": "fortune_sunlite_oil_5l",
+            "qty": 1,
+            "lock_platform": "amazon",
+        },
+    )
+    baskets_client.post(
+        f"/api/v1/lists/{list_id}/needs",
+        json={
+            "line_id": "surf",
+            "product_key": "surf_excel_matic_fl_liquid_2l",
+            "qty": 1,
+            "lock_platform": "amazon",
+        },
+    )
+
+    baskets_client.post(
+        "/api/v1/offers",
+        json={
+            "code": "A1",
+            "platform": "amazon",
+            "kind": "flat",
+            "min_order_paise": 50000,
+            "value_paise": 5000,
+            "uses_left": 2,
+        },
+    )
+
+    filler_listing = _get_amazon_filler()
+
+    r_plan = baskets_client.post(
+        f"/api/v1/lists/{list_id}/plan",
+        json={
+            "fillers": [
+                {
+                    "filler_id": "vim_filler",
+                    "listing_id": filler_listing.id,
+                    "score": 10,
+                }
+            ],
+            "max_filler_gap_paise": 25000,
+        },
+    )
+    plan_run_id = r_plan.json()["plan_run_id"]
+
+    r_acc = baskets_client.post(
+        f"/api/v1/plan-runs/{plan_run_id}/accept",
+        json={"label": "max_savings"},
+    )
+    baskets = r_acc.json()
+    pending_basket = next(b for b in baskets if b["status"] == "pending")
+    assert pending_basket["platform"] == "amazon"
+    pending_id = pending_basket["id"]
+
+    # Find a listing on a different platform (e.g. instamart or blinkit)
+    seed = load_seed()
+    diff_platform_listing = next(item for item in seed if item.platform != "amazon")
+
+    # Attempt to add line with different platform -> 422
+    r_add_diff = baskets_client.post(
+        f"/api/v1/baskets/{pending_id}/lines",
+        json={"listing_id": diff_platform_listing.id, "line_id": "diff_plat_line"},
+    )
+    assert r_add_diff.status_code == 422
+
