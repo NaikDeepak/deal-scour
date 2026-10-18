@@ -8,7 +8,7 @@
 - [ ] Deferred to Phase 1: SQLModel + Alembic (first DB-backed feature) and the PWA plugin (with the first real screen).
 - [x] `core/money.py` (paise helpers), `pricing/units.py`, `pricing/fee_schedules.py`, `pricing/landed.py` with tests.
 - [x] Seed file with the 28 prototype listings as `source="sample"` (walnuts get their own product) → `backend/app/seed/prototype_catalog.json`.
-- [ ] `docker-compose.yml` + Caddy, running locally.
+- [x] `docker-compose.yml` + Caddy + backup script + `deploy/README.md` (config validated; image build not yet run on the dev machine).
 
 **Exit:** `GET /deals` returns correct membership-aware landed prices and unit rates, with order-level fees shown separately. ✅ Met 2026-10-18 (`GET /api/v1/deals`).
 

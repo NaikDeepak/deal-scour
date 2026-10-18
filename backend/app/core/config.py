@@ -6,6 +6,7 @@ from pathlib import Path
 @dataclass(frozen=True)
 class Settings:
     db_path: Path
+    static_dir: Path | None = None  # built web app to serve (set in the Docker image)
 
     @property
     def db_url(self) -> str:
@@ -17,11 +18,11 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> "Settings":
-        raw_path = os.environ.get("DEALSCOUR_DB_PATH", "./data/dealscour.db")
-        path = Path(raw_path)
-        settings = cls(db_path=path)
-        settings.ensure_db_dir()
-        return settings
+        static = os.environ.get("DEALSCOUR_STATIC_DIR")
+        return cls(
+            db_path=Path(os.environ.get("DEALSCOUR_DB_PATH", "./data/dealscour.db")),
+            static_dir=Path(static) if static else None,
+        )
 
 
 def get_settings() -> Settings:

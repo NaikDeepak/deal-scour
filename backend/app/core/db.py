@@ -1,5 +1,6 @@
 import sqlite3
 from collections.abc import Generator
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,7 @@ def _set_sqlite_pragma(dbapi_connection: Any, connection_record: Any) -> None:
 def create_db_engine(db_path_or_url: Path | str | None = None) -> Engine:
     if db_path_or_url is None:
         settings = get_settings()
+        settings.ensure_db_dir()
         url = settings.db_url
     elif isinstance(db_path_or_url, Path):
         url = f"sqlite:///{db_path_or_url.resolve()}"
@@ -35,11 +37,14 @@ def create_db_engine(db_path_or_url: Path | str | None = None) -> Engine:
     return eng
 
 
-engine = create_db_engine()
+@lru_cache(maxsize=1)
+def get_engine() -> Engine:
+    # Created on first use, not at import: importing the app must not touch the filesystem.
+    return create_db_engine()
 
 
 def get_session() -> Generator[Session, None, None]:
-    with Session(engine) as session:
+    with Session(get_engine()) as session:
         yield session
 
 
