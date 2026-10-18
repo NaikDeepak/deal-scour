@@ -271,6 +271,7 @@ def test_8_household_isolation(
         session.add(mem2)
 
         from app.core.security import generate_session_token, hash_token
+
         token_b = generate_session_token()
         session_b = AuthSession(
             token_hash=hash_token(token_b),
@@ -573,9 +574,7 @@ def test_19_racing_invites_leave_no_orphan_user(
         # Exactly 2 users: owner + Alice
         assert len(all_users) == 2
 
-        inv_db = s.exec(
-            select(Invite).where(Invite.code_hash == hash_invite_code(invite_code))
-        ).first()
+        inv_db = s.exec(select(Invite).where(Invite.code_hash == hash_invite_code(invite_code))).first()
         assert inv_db is not None
         assert inv_db.used_by == alice_user.id
         assert inv_db.used_at is not None
@@ -621,9 +620,7 @@ def test_19_racing_invites_simulated_interleaved_claim_leaves_no_orphan(
         nonlocal interleaved
         if "UPDATE invite" in statement and not interleaved:
             interleaved = True
-            conn.exec_driver_sql(
-                "UPDATE invite SET used_at = '2026-10-18 12:00:00' WHERE used_at IS NULL"
-            )
+            conn.exec_driver_sql("UPDATE invite SET used_at = '2026-10-18 12:00:00' WHERE used_at IS NULL")
 
     try:
         r_carol = auth_client.post(
@@ -646,3 +643,28 @@ def test_19_racing_invites_simulated_interleaved_claim_leaves_no_orphan(
         carol_user = s.exec(select(AppUser).where(AppUser.email == "carol@family.local")).first()
         assert carol_user is None
 
+
+def test_20_attempts_reserved_atomically_success_not_counted(
+    auth_client: TestClient,
+    capturing_sender: CapturingEmailSender,
+    engine: Engine,
+) -> None:
+    """Verify reserves an attempt (guarded UPDATE) before comparing; a correct code gives it back."""
+    from sqlmodel import Session, select
+
+    from app.domain.models import LoginCode
+
+    email = "owner@dealscour.local"
+    auth_client.post("/api/v1/auth/request-code", json={"email": email})
+    code = capturing_sender.sent[-1][1]
+    wrong = "000000" if code != "000000" else "111111"
+    for _ in range(4):
+        assert (
+            auth_client.post("/api/v1/auth/verify", json={"email": email, "code": wrong}).status_code == 400
+        )
+    # 5th request is the right code: allowed (4 < 5), and the reserved attempt is handed back.
+    assert auth_client.post("/api/v1/auth/verify", json={"email": email, "code": code}).status_code == 200
+    with Session(engine) as s:
+        row = s.exec(select(LoginCode).where(LoginCode.email == email)).one()
+        assert row.attempts == 4  # only the wrong guesses count toward the budget
+        assert row.used_at is not None

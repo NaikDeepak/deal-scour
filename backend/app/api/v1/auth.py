@@ -187,15 +187,32 @@ def verify(
             detail="Invalid or expired code",
         )
 
-    # Constant-time HMAC comparison
-    if not verify_login_code(email, req.code, code_row.code_hash, settings.secret_key):
-        code_row.attempts += 1
-        session.add(code_row)
-        session.commit()
+    # Reserve an attempt atomically BEFORE comparing: parallel guesses each consume one, so neither the
+    # per-code limit (5) nor the email-wide budget (10 / 24 h) can be raced past.
+    reserved = session.exec(
+        sa.update(LoginCode)
+        .where(col(LoginCode.id) == code_row.id, col(LoginCode.attempts) < 5)
+        .values(attempts=LoginCode.attempts + 1)
+    )
+    session.commit()
+    if reserved.rowcount != 1 or _get_24h_failed_attempts(session, email, now_dt) > 10:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired code",
         )
+
+    # Constant-time HMAC comparison
+    if not verify_login_code(email, req.code, code_row.code_hash, settings.secret_key):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired code",
+        )
+
+    # Correct code: hand the reserved attempt back, so successful sign-ins never count toward lockout.
+    session.exec(
+        sa.update(LoginCode).where(col(LoginCode.id) == code_row.id).values(attempts=LoginCode.attempts - 1)
+    )
+    session.refresh(code_row)
 
     # Valid! Mark code as used
     code_row.used_at = now_dt
