@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 from app.core.money import Paise
 from app.domain.catalog import SeedListing, load_seed
+from app.domain.need_rules import validate_need
 from app.optimizer.contract import Offer, OfferKind, ValueType
 from app.optimizer.pending import (
     DEFAULT_PENDING_SETTINGS,
@@ -19,9 +20,6 @@ from app.pricing.landed import unit_price
 from app.pricing.units import parse_pack
 
 router = APIRouter()
-
-# Largest flexible quantity per need: 100 kg, 100 L, 1000 pieces.
-_MAX_QUANTITY = {"g": 100_000, "ml": 100_000, "pc": 1_000}
 
 _VALID_PLATFORMS: set[str] = {"amazon", "flipkart", "blinkit", "instamart", "zepto"}
 ALL_PLATFORMS: list[Platform] = ["amazon", "flipkart", "blinkit", "instamart", "zepto"]
@@ -252,29 +250,20 @@ def post_plans(req: PlansRequest) -> PlansResponse:
 
     try:
         for need in req.needs:
-            if need.qty < 1 or need.qty > 99:
-                raise ValueError(f"qty must be 1..99, got {need.qty}")
-
             if need.line_id in seen_line_ids:
                 raise ValueError(f"Duplicate line_id: {need.line_id}")
             seen_line_ids.add(need.line_id)
 
-            has_pk = need.product_key is not None
-            has_fk = need.family_key is not None
-            if (has_pk and has_fk) or (not has_pk and not has_fk):
-                raise ValueError(
-                    f"Line {need.line_id}: exactly one of product_key or family_key must be set"
-                )
+            validate_need(
+                product_key=need.product_key,
+                family_key=need.family_key,
+                quantity=need.quantity,
+                qty=need.qty,
+                catalog=listings,
+                line_id=need.line_id,
+            )
 
-            if has_pk:
-                assert need.product_key is not None
-                if need.quantity is not None:
-                    raise ValueError(
-                        f"Line {need.line_id}: quantity must be null for exact product needs"
-                    )
-                if need.product_key not in seed_by_product:
-                    raise ValueError(f"Unknown product_key: {need.product_key}")
-
+            if need.product_key is not None:
                 prod_listings = seed_by_product[need.product_key]
                 candidates = [
                     Candidate(
@@ -300,26 +289,14 @@ def post_plans(req: PlansRequest) -> PlansResponse:
                 )
             else:
                 assert need.family_key is not None
-                if need.quantity is None:
-                    raise ValueError(
-                        f"Line {need.line_id}: quantity is required for flexible family needs"
-                    )
-                if need.family_key not in seed_by_family:
-                    raise ValueError(f"Unknown family_key: {need.family_key}")
-
+                assert need.quantity is not None
                 parsed_pack = parse_pack(need.quantity)
-                if parsed_pack.qty > _MAX_QUANTITY[parsed_pack.unit]:
-                    raise ValueError(f"Line {need.line_id}: quantity {need.quantity} is too large")
                 target = parsed_pack.qty * need.qty
 
                 family_listings = seed_by_family[need.family_key]
                 matching_listings = [
                     item for item in family_listings if item.pack.unit == parsed_pack.unit
                 ]
-                if not matching_listings:
-                    raise ValueError(
-                        f"No listings in family '{need.family_key}' match unit '{parsed_pack.unit}'"
-                    )
 
                 candidates = []
                 for item in matching_listings:
