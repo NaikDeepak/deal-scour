@@ -26,6 +26,7 @@ Add new ADRs at the bottom and never rewrite an accepted one. Supersede it inste
 | 019 | Single source of truth for pricing/optimization (server) | Accepted |
 | 020 | Never auto-checkout or store platform credentials | Accepted |
 | 021 | AGENTS.md is canonical; CLAUDE.md imports it | Accepted |
+| 022 | Open source, BYOK: each deployment brings its own keys | Accepted |
 
 ---
 
@@ -176,3 +177,14 @@ compare modal, matrix view, membership toggles. Do not port the code.
 **Context.** Several AI coding tools are in use (Claude Code, Codex, Qodo). Duplicated instruction files drift.
 **Decision.** `AGENTS.md` holds all project rules. `CLAUDE.md` contains `@AGENTS.md` plus Claude-only notes.
 **Consequences.** Edit rules in one place.
+
+### ADR-022 · Open source, BYOK: each deployment brings its own keys
+*2026-10-18 · Accepted*
+**Context.** The repo is public. Friends and family may run their own copy rather than share one instance. Some features
+need third-party credentials (SMTP, Telegram bot, Web Push VAPID keys, an LLM API key, Amazon PA-API).
+**Decision.** Bring-your-own-key. The repo ships no keys and no hosted service. Every credential comes from the deployer's
+`.env` (template: `.env.example`). Each key-dependent feature is **off when its key is empty** and the app still works
+(manual prices, no LLM parsing, in-app notifications only). Keys are never stored in the DB, logged, sent to the browser,
+or written to the agent notepad. LLM usage stays capped per ADR-016.
+**Consequences.** There's no shared cost, and each user's data and keys stay on their own box. Setup docs must list every key and what it unlocks.
+CI and tests never need real keys.
