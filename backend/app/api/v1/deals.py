@@ -158,6 +158,3 @@ def get_deals(
         filtered_deals.sort(key=lambda d: (d.eta_minutes, d.id))
 
     return DealsResponse(count=len(filtered_deals), deals=filtered_deals)
-
-
-# HOOK: app.include_router(deals.router, prefix="/api/v1") in app/main.py (wired by lead)
