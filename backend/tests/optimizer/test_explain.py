@@ -70,7 +70,9 @@ def test_dead_weight() -> None:
 
     a = _need("a", 60000, "amazon")
     b = _need("b", 60000, "amazon")
-    a1 = Offer(id="A1", platform="amazon", kind="flat", min_order=50000, value=5000, uses_left=2, value_type="cash")
+    a1 = Offer(
+        id="A1", platform="amazon", kind="flat", min_order=50000, value=5000, uses_left=2, value_type="cash"
+    )
     memberships = {"amazon": True}
     base = baseline_plan([a, b], [a1], memberships)
     plan = plan_cheapest_now([a, b], [a1], memberships, settings=PlanSettings(max_orders_per_platform=1))
@@ -85,9 +87,14 @@ def test_dead_weight() -> None:
 
 def test_no_dead_weight_when_no_valid_split() -> None:
     # One ₹1,200 item can't be split; ₹665 + ₹344 can't make two ₹500 orders. Neither gets the hint.
-    a1 = Offer(id="A1", platform="amazon", kind="flat", min_order=50000, value=5000, uses_left=2, value_type="cash")
+    a1 = Offer(
+        id="A1", platform="amazon", kind="flat", min_order=50000, value=5000, uses_left=2, value_type="cash"
+    )
     memberships = {"amazon": True}
-    for needs in ([_need("bulk", 120000, "amazon")], [_need("oil", 66500, "amazon"), _need("surf", 34400, "amazon")]):
+    for needs in (
+        [_need("bulk", 120000, "amazon")],
+        [_need("oil", 66500, "amazon"), _need("surf", 34400, "amazon")],
+    ):
         base = baseline_plan(needs, [a1], memberships)
         plan = plan_cheapest_now(needs, [a1], memberships)
         assert not [r for r in explain(plan, base, [a1]) if r.code == "DEAD_WEIGHT"]
@@ -295,7 +302,11 @@ def test_no_split_reason_when_a_line_just_moves_onto_a_platform() -> None:
         (Candidate("g-a", "amazon", 58900, 1440), Candidate("g-b", "blinkit", 58500, 10)),
     )
     members: dict[Platform, bool] = {
-        "amazon": True, "flipkart": True, "blinkit": False, "instamart": True, "zepto": False
+        "amazon": True,
+        "flipkart": True,
+        "blinkit": False,
+        "instamart": True,
+        "zepto": False,
     }
     a1 = Offer("A1", "amazon", "flat", min_order=50000, value=5000, uses_left=2)
     plan = plan_cheapest_now([ghee], [a1], members)

@@ -199,7 +199,7 @@ def test_empty_needs() -> None:
 
 def test_dead_weight_in_planset() -> None:
     # A single ₹1,200 item can't be split into two ₹500+ orders, so plan() gives no DEAD_WEIGHT hint
-    # (the hint only appears when a real split exists, e.g. under max_orders_per_platform=1; see test_explain).
+    # (it appears only when a real split exists, e.g. max_orders_per_platform=1; see test_explain).
     item = _need("item", 120000, "amazon")
     a1 = Offer(
         id="A1",
