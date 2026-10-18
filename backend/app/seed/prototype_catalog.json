@@ -1,9 +1,10 @@
 {
-  "_note": "Sample data imported from prototype/dealscour_v3.html. Prices are illustrative, not live (source=sample). Money in paise.",
+  "_note": "Sample data imported from prototype/dealscour_v3.html. Prices are illustrative, not live (source=sample). Money in paise. product_key = one exact pack (brand + variant + size); family_key = interchangeable items for brand/pack-flexible needs (ADR-012).",
   "listings": [
     {
       "id": "stp-1",
-      "product_key": "aashirvaad_atta",
+      "product_key": "aashirvaad_select_atta_5kg",
+      "family_key": "atta",
       "category": "staples",
       "title": "Aashirvaad Select 100% MP Sharbati Whole Wheat Atta",
       "brand": "Aashirvaad",
@@ -23,7 +24,8 @@
     },
     {
       "id": "stp-2",
-      "product_key": "aashirvaad_atta",
+      "product_key": "aashirvaad_select_atta_5kg",
+      "family_key": "atta",
       "category": "staples",
       "title": "Aashirvaad Select 100% MP Sharbati Whole Wheat Atta",
       "brand": "Aashirvaad",
@@ -43,7 +45,8 @@
     },
     {
       "id": "stp-3",
-      "product_key": "aashirvaad_atta",
+      "product_key": "aashirvaad_select_atta_5kg",
+      "family_key": "atta",
       "category": "staples",
       "title": "Aashirvaad Select 100% MP Sharbati Whole Wheat Atta",
       "brand": "Aashirvaad",
@@ -63,7 +66,8 @@
     },
     {
       "id": "stp-4",
-      "product_key": "fortune_oil",
+      "product_key": "fortune_sunlite_oil_5l",
+      "family_key": "sunflower_oil",
       "category": "staples",
       "title": "Fortune Sunlite Refined Sunflower Cooking Oil Can",
       "brand": "Fortune",
@@ -83,7 +87,8 @@
     },
     {
       "id": "stp-5",
-      "product_key": "fortune_oil",
+      "product_key": "fortune_sunlite_oil_5l",
+      "family_key": "sunflower_oil",
       "category": "staples",
       "title": "Fortune Sunlite Refined Sunflower Cooking Oil Can",
       "brand": "Fortune",
@@ -103,7 +108,8 @@
     },
     {
       "id": "stp-6",
-      "product_key": "fortune_oil",
+      "product_key": "fortune_sunlite_oil_1l",
+      "family_key": "sunflower_oil",
       "category": "staples",
       "title": "Fortune Sunlite Refined Sunflower Oil Pouch",
       "brand": "Fortune",
@@ -123,7 +129,8 @@
     },
     {
       "id": "stp-7",
-      "product_key": "india_gate_rice",
+      "product_key": "india_gate_super_basmati_5kg",
+      "family_key": "basmati_rice",
       "category": "staples",
       "title": "India Gate Super Aged Basmati Rice Family Pack",
       "brand": "India Gate",
@@ -143,7 +150,8 @@
     },
     {
       "id": "stp-8",
-      "product_key": "india_gate_rice",
+      "product_key": "india_gate_super_basmati_5kg",
+      "family_key": "basmati_rice",
       "category": "staples",
       "title": "India Gate Super Aged Basmati Rice Family Pack",
       "brand": "India Gate",
@@ -163,7 +171,8 @@
     },
     {
       "id": "stp-9",
-      "product_key": "tata_dal",
+      "product_key": "tata_sampann_toor_dal_1kg",
+      "family_key": "toor_dal",
       "category": "staples",
       "title": "Tata Sampann Unpolished Toor Dal / Arhar Dal",
       "brand": "Tata Sampann",
@@ -183,7 +192,8 @@
     },
     {
       "id": "dry-1",
-      "product_key": "amul_ghee",
+      "product_key": "amul_cow_ghee_1l",
+      "family_key": "cow_ghee",
       "category": "dairy",
       "title": "Amul Pure Cow Ghee Tin Pack",
       "brand": "Amul",
@@ -203,7 +213,8 @@
     },
     {
       "id": "dry-2",
-      "product_key": "amul_ghee",
+      "product_key": "amul_cow_ghee_1l",
+      "family_key": "cow_ghee",
       "category": "dairy",
       "title": "Amul Pure Cow Ghee Tin Pack",
       "brand": "Amul",
@@ -223,7 +234,8 @@
     },
     {
       "id": "dry-3",
-      "product_key": "amul_ghee",
+      "product_key": "gowardhan_cow_ghee_1l",
+      "family_key": "cow_ghee",
       "category": "dairy",
       "title": "Gowardhan Pure Cow Ghee Refill Jar",
       "brand": "Gowardhan",
@@ -243,7 +255,8 @@
     },
     {
       "id": "dry-4",
-      "product_key": "oats_muesli",
+      "product_key": "quaker_oats_1_5kg",
+      "family_key": "oats",
       "category": "dairy",
       "title": "Quaker Rolled & Wholegrain Oats Super Saver Pouch",
       "brand": "Quaker",
@@ -263,7 +276,8 @@
     },
     {
       "id": "bev-1",
-      "product_key": "tata_tea",
+      "product_key": "tata_tea_gold_1kg",
+      "family_key": "tea",
       "category": "beverages",
       "title": "Tata Tea Gold Rich Assam Tea With 15% Long Leaves",
       "brand": "Tata Tea",
@@ -283,7 +297,8 @@
     },
     {
       "id": "bev-2",
-      "product_key": "tata_tea",
+      "product_key": "tata_tea_gold_500g",
+      "family_key": "tea",
       "category": "beverages",
       "title": "Tata Tea Gold Rich Assam Tea Pack",
       "brand": "Tata Tea",
@@ -303,7 +318,8 @@
     },
     {
       "id": "bev-3",
-      "product_key": "coffee_jar",
+      "product_key": "bru_instant_coffee_200g",
+      "family_key": "instant_coffee",
       "category": "beverages",
       "title": "Bru Instant Aromatic Chicory Blend Coffee Refill",
       "brand": "Bru",
@@ -323,7 +339,8 @@
     },
     {
       "id": "cln-1",
-      "product_key": "surf_liquid",
+      "product_key": "surf_excel_matic_fl_liquid_2l",
+      "family_key": "front_load_liquid",
       "category": "cleaning",
       "title": "Surf Excel Matic Front Load Detergent Liquid Pouch",
       "brand": "Surf Excel",
@@ -343,7 +360,8 @@
     },
     {
       "id": "cln-2",
-      "product_key": "surf_liquid",
+      "product_key": "surf_excel_matic_fl_liquid_2l",
+      "family_key": "front_load_liquid",
       "category": "cleaning",
       "title": "Surf Excel Matic Front Load Detergent Liquid Pouch",
       "brand": "Surf Excel",
@@ -363,7 +381,8 @@
     },
     {
       "id": "cln-3",
-      "product_key": "surf_liquid",
+      "product_key": "ariel_matic_fl_liquid_2l",
+      "family_key": "front_load_liquid",
       "category": "cleaning",
       "title": "Ariel Matic Front Load Liquid Detergent Refill",
       "brand": "Ariel",
@@ -383,7 +402,8 @@
     },
     {
       "id": "cln-4",
-      "product_key": "vim_gel",
+      "product_key": "vim_dishwash_gel_2l",
+      "family_key": "dishwash_liquid",
       "category": "cleaning",
       "title": "Vim Dishwash Liquid Gel Lemon Refill Pouch",
       "brand": "Vim",
@@ -403,7 +423,8 @@
     },
     {
       "id": "per-1",
-      "product_key": "dove_soap",
+      "product_key": "dove_cream_bar_4x125g",
+      "family_key": "bathing_soap",
       "category": "personal",
       "title": "Dove Cream Beauty Bathing Bar Value Multipack (4 x 125g)",
       "brand": "Dove",
@@ -423,7 +444,8 @@
     },
     {
       "id": "per-2",
-      "product_key": "dove_soap",
+      "product_key": "dettol_handwash_refill_1_5l",
+      "family_key": "handwash",
       "category": "personal",
       "title": "Dettol Skincare Liquid Handwash Refill Canister",
       "brand": "Dettol",
@@ -443,7 +465,8 @@
     },
     {
       "id": "alm-1",
-      "product_key": "california_almonds",
+      "product_key": "happilo_almonds_1kg",
+      "family_key": "almonds",
       "category": "dryfruits",
       "title": "Happilo 100% Real Premium California Almonds Value Pack",
       "brand": "Happilo",
@@ -463,7 +486,8 @@
     },
     {
       "id": "alm-2",
-      "product_key": "california_almonds",
+      "product_key": "farmley_almonds_500g",
+      "family_key": "almonds",
       "category": "dryfruits",
       "title": "Farmley California Almonds Vacuum Packed",
       "brand": "Farmley",
@@ -483,7 +507,8 @@
     },
     {
       "id": "alm-3",
-      "product_key": "california_almonds",
+      "product_key": "nutraj_almonds_500g",
+      "family_key": "almonds",
       "category": "dryfruits",
       "title": "Nutraj California Raw Almond Kernels Super Saver",
       "brand": "Nutraj",
@@ -503,7 +528,8 @@
     },
     {
       "id": "cas-1",
-      "product_key": "cashews_w240",
+      "product_key": "tata_sampann_cashews_w240_500g",
+      "family_key": "cashews",
       "category": "dryfruits",
       "title": "Tata Sampann 100% Pure Whole Cashews W240 King Size",
       "brand": "Tata Sampann",
@@ -523,7 +549,8 @@
     },
     {
       "id": "cas-2",
-      "product_key": "cashews_w240",
+      "product_key": "happilo_cashews_w320_500g",
+      "family_key": "cashews",
       "category": "dryfruits",
       "title": "Happilo Whole Cashews W320 Crunch Zipper Pouch",
       "brand": "Happilo",
@@ -543,7 +570,8 @@
     },
     {
       "id": "wal-1",
-      "product_key": "nutraj_walnuts",
+      "product_key": "nutraj_walnuts_500g",
+      "family_key": "walnuts",
       "category": "dryfruits",
       "title": "Nutraj Kashmir Snow White Walnut Kernels (Akhrot)",
       "brand": "Nutraj",
