@@ -1,0 +1,35 @@
+# agent-notepad price table, used by `scripts/collab.sh cost`.
+# USD per 1M tokens.  model  input  output  cache_read  cache_write_5m  cache_write_1h
+# A trailing * matches every model that starts with the text before it. Exact names win over prefixes.
+# Models not listed here show "n/a" instead of a cost. Prices change: re-check the vendor page and edit.
+#
+# Anthropic. Source: https://platform.claude.com/docs/en/about-claude/pricing (checked 2026-10-10)
+claude-fable-5-1    10     50     0.25    12.50   20
+claude-mythos-5-1   10     50     0.25    12.50   20
+claude-fable-5      10     50     1       12.50   20
+claude-mythos-5     10     50     1       12.50   20
+claude-opus-5-5     4      20     0.20    5       8
+claude-sonnet-5-5   2      10     0.10    2.50    4
+claude-haiku-5-5    0.10   0.50   0.01    0.125   0.20    # prompts up to 100K tokens; longer prompts cost 5x
+claude-opus-5       5      25     0.50    6.25    10
+claude-sonnet-5     2      10     0.20    2.50    4
+claude-opus-4-*     5      25     0.50    6.25    10      # Opus 4.5 to 4.8 (Opus 4 and 4.1 cost 3x)
+claude-sonnet-4-*   3      15     0.30    3.75    6
+claude-haiku-4-5*   1      5      0.10    1.25    2
+#
+# OpenAI (Codex). Source: https://developers.openai.com/api/docs/pricing (checked 2026-10-10)
+# Short-context prices (prompt up to 272K tokens; longer prompts cost about 2x). Cache writes go in the 5m column.
+gpt-6-luna          0.10   0.50   0.01    0.125   0
+gpt-6-sol           2      10     0.20    2.50    0
+gpt-6.1-sol         2      10     0.10    2.50    0
+gpt-6-astra         10     50     1       12.50   0
+gpt-5.3-codex       1.75   14     0.175   0       0
+#
+# Google (Antigravity / Gemini). Source: https://ai.google.dev/gemini-api/docs/pricing (checked 2026-10-10)
+# agy model names carry an effort suffix (gemini-3.8-flash-high); `cost` strips it to find the price.
+# Gemini bills context-cache storage per hour, not per write; that isn't in the logs, so it isn't counted.
+gemini-3.8-flash    0.75   3.75   0.075   0       0       # intro price until 2026-12-31; from 2027: 1.50 7.50 0.15
+gemini-3.6-flash    0.75   3.75   0.075   0       0       # intro price until 2026-12-31; from 2027: 1.50 7.50 0.15
+gemini-3.1-pro*     2      12     0.20    0       0       # prompts up to 200K; longer prompts: 4 18 0.40
+gemini-3-flash*     0.50   3      0.05    0       0
+# gemini-3.7-flash is offered in agy but has no public API price: it shows n/a.
