@@ -49,9 +49,16 @@ def upgrade() -> None:
         unique=True,
         sqlite_where=sa.text("archived = 0"),
     )
+    op.create_index(
+        "ix_custom_listing_household_product_key",
+        "custom_listing",
+        ["household_id", "product_key"],
+        unique=True,
+    )
 
 
 def downgrade() -> None:
+    op.drop_index("ix_custom_listing_household_product_key", table_name="custom_listing")
     op.drop_index("ix_custom_listing_household_platform_sku_active", table_name="custom_listing")
     op.drop_index("ix_custom_listing_family_key", table_name="custom_listing")
     op.drop_index("ix_custom_listing_product_key", table_name="custom_listing")

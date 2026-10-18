@@ -5,6 +5,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, select
 
 from app.core import clock
@@ -106,6 +107,18 @@ def _make_base_slug(brand: str, title: str, pack_label: str) -> str:
     candidate = "_".join(parts)
     candidate = re.sub(r"[^a-z0-9_]+", "_", candidate).strip("_")
     return candidate or "product"
+
+
+def _next_slug(base_slug: str, current_key: str) -> str:
+    m = re.search(r"_(\d+)$", current_key)
+    if m:
+        curr_i = int(m.group(1))
+        next_i = curr_i + 1
+    else:
+        next_i = 2
+    suffix = f"_{next_i}"
+    max_len = 60 - len(suffix)
+    return f"{base_slug[:max_len].rstrip('_')}{suffix}"
 
 
 @router.post("/listings/parse", response_model=ParseListingResponse)
@@ -210,46 +223,61 @@ def create_listing(
                 break
             i += 1
 
-    # 7. Insert CustomListing
-    temp_id = f"pending-{uuid.uuid4().hex}"
-    listing = CustomListing(
-        household_id=household_id,
-        listing_id=temp_id,
-        platform=ref.platform,
-        sku=ref.sku,
-        url=ref.url,
-        title=req.title,
-        brand=req.brand,
-        pack_label=req.pack_label,
-        category=category_slug,
-        product_key=product_key,
-        family_key=family_slug,
-        icon=req.icon or "🛒",
-        archived=False,
-        created_at=now_dt,
-    )
-    session.add(listing)
-    session.flush()
+    # 7. Insert CustomListing and first price observation
+    def _attempt_insert(key: str) -> tuple[CustomListing, PriceObservation]:
+        temp_id = f"pending-{uuid.uuid4().hex}"
+        listing_obj = CustomListing(
+            household_id=household_id,
+            listing_id=temp_id,
+            platform=ref.platform,
+            sku=ref.sku,
+            url=ref.url,
+            title=req.title,
+            brand=req.brand,
+            pack_label=req.pack_label,
+            category=category_slug,
+            product_key=key,
+            family_key=family_slug,
+            icon=req.icon or "🛒",
+            archived=False,
+            created_at=now_dt,
+        )
+        session.add(listing_obj)
+        session.flush()
 
-    listing.listing_id = f"cus-{listing.id}"
-    session.add(listing)
+        listing_obj.listing_id = f"cus-{listing_obj.id}"
+        session.add(listing_obj)
 
-    # 8. Create first price_observation
-    obs = PriceObservation(
-        household_id=household_id,
-        listing_id=listing.listing_id,
-        listed_paise=req.listed_paise,
-        mrp_paise=req.mrp_paise,
-        member_price_paise=req.member_price_paise,
-        in_stock=req.in_stock,
-        eta_minutes=None,
-        source="manual",
-        note=None,
-        observed_at=now_dt,
-    )
-    session.add(obs)
-    session.commit()
-    session.refresh(listing)
+        obs_obj = PriceObservation(
+            household_id=household_id,
+            listing_id=listing_obj.listing_id,
+            listed_paise=req.listed_paise,
+            mrp_paise=req.mrp_paise,
+            member_price_paise=req.member_price_paise,
+            in_stock=req.in_stock,
+            eta_minutes=None,
+            source="manual",
+            note=None,
+            observed_at=now_dt,
+        )
+        session.add(obs_obj)
+        session.commit()
+        session.refresh(listing_obj)
+        return listing_obj, obs_obj
+
+    try:
+        listing, obs = _attempt_insert(product_key)
+    except IntegrityError:
+        session.rollback()
+        next_key = _next_slug(base_slug, product_key)
+        try:
+            listing, obs = _attempt_insert(next_key)
+        except IntegrityError as err:
+            session.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Product key collision could not be resolved: {err}",
+            ) from err
 
     freshness = compute_freshness(listing.platform, obs.observed_at, now_dt)
 

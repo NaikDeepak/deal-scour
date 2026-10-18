@@ -254,11 +254,12 @@ def all_listings(
     session: Session,
     household_id: int,
 ) -> list[SeedListing]:
-    """Return all seed listings plus all custom listings for this household."""
+    """Return all seed listings plus non-archived custom listings for this household."""
     seed = load_seed()
     custom_listings = session.exec(
         select(CustomListing).where(
             CustomListing.household_id == household_id,
+            CustomListing.archived.is_(False),  # type: ignore[attr-defined]
         )
     ).all()
 

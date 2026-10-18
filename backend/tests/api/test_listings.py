@@ -407,10 +407,10 @@ def test_case_7_patch_archive_and_unpriced_list_need(listings_client: TestClient
     deals = listings_client.get("/api/v1/deals").json()["deals"]
     assert not any(d["id"] == lid for d in deals)
 
-    # Plan the list again: the saved need now has no candidates -> unpriced!
-    plan2 = listings_client.post(f"/api/v1/lists/{list_id}/plan", json={}).json()
-    cheapest2 = next(p for p in plan2["plans"] if p["label"] == "cheapest_now")
-    assert "honey_need" in cheapest2["unpriced"]
+    # Planning the saved list now fails validation because product_key is archived
+    plan2_res = listings_client.post(f"/api/v1/lists/{list_id}/plan", json={})
+    assert plan2_res.status_code == 422
+    assert f"Unknown product_key: {pk}" in plan2_res.text
 
 
 def test_case_8_catalog_families(listings_client: TestClient) -> None:
@@ -450,3 +450,117 @@ def test_case_8_catalog_families(listings_client: TestClient) -> None:
     assert "g" in cheese_fam["units"]
     keys2 = [f["family_key"] for f in families2]
     assert keys2 == sorted(keys2)
+
+
+def test_review_item_13_archived_custom_listing_excluded_from_need_validation(
+    listings_client: TestClient,
+) -> None:
+    # Create and archive a custom listing
+    res = listings_client.post(
+        "/api/v1/listings",
+        json={
+            "url": "https://www.amazon.in/dp/B00EXCLU13",
+            "title": "Exclusive Ghee",
+            "brand": "Govind",
+            "pack_label": "1l",
+            "category": "dairy",
+            "family_key": "ghee",
+            "listed_paise": 65000,
+            "mrp_paise": 70000,
+        },
+    )
+    assert res.status_code == 201
+    pk = res.json()["product_key"]
+    lid = res.json()["listing_id"]
+
+    # Archive it
+    arch_res = listings_client.patch(f"/api/v1/listings/{lid}", json={"archived": True})
+    assert arch_res.status_code == 200
+
+    # Submitting need via POST /plans on archived product_key -> 422
+    plan_res = listings_client.post(
+        "/api/v1/plans",
+        json={"needs": [{"line_id": "item13_need", "product_key": pk, "qty": 1}]},
+    )
+    assert plan_res.status_code == 422
+    assert f"Unknown product_key: {pk}" in plan_res.text
+
+    # Submitting need via POST /lists/{id}/needs on archived product_key -> 422
+    list_res = listings_client.post("/api/v1/lists", json={"name": "Temp List", "kind": "quick"})
+    assert list_res.status_code == 201
+    list_id = list_res.json()["id"]
+
+    need_res = listings_client.post(
+        f"/api/v1/lists/{list_id}/needs",
+        json={"line_id": "temp_need", "product_key": pk, "qty": 1},
+    )
+    assert need_res.status_code == 422
+    assert f"Unknown product_key: {pk}" in need_res.text
+
+
+def test_review_item_14_unique_product_key_and_integrity_error_retry(
+    listings_client: TestClient,
+) -> None:
+    # 1. Create first listing with base slug
+    res1 = listings_client.post(
+        "/api/v1/listings",
+        json={
+            "url": "https://www.amazon.in/dp/B00SALT001",
+            "title": "Pure Salt",
+            "brand": "Tata",
+            "pack_label": "1kg",
+            "category": "staples",
+            "family_key": "salt",
+            "listed_paise": 2800,
+            "mrp_paise": 3000,
+        },
+    )
+    assert res1.status_code == 201
+    assert res1.json()["product_key"] == "tata_pure_salt_1kg"
+    lid1 = res1.json()["listing_id"]
+
+    # Archive listing 1 so it is excluded from all_listings (simulating collision on unlisted key)
+    listings_client.patch(f"/api/v1/listings/{lid1}", json={"archived": True})
+
+    # 2. Create second listing with same brand/title/pack (different sku)
+    # create_listing will try base slug "tata_pure_salt_1kg", hit IntegrityError,
+    # retry with next suffix "_2" and succeed.
+    res2 = listings_client.post(
+        "/api/v1/listings",
+        json={
+            "url": "https://blinkit.com/prn/tata-pure-salt/prid/123456",
+            "title": "Pure Salt",
+            "brand": "Tata",
+            "pack_label": "1kg",
+            "category": "staples",
+            "family_key": "salt",
+            "listed_paise": 2900,
+            "mrp_paise": 3000,
+        },
+    )
+    assert res2.status_code == 201
+    assert res2.json()["product_key"] == "tata_pure_salt_1kg_2"
+    lid2 = res2.json()["listing_id"]
+
+    # Archive listing 2 as well so both base and "_2" are in DB
+    listings_client.patch(f"/api/v1/listings/{lid2}", json={"archived": True})
+
+    # 3. Create third listing with same brand/title/pack (different sku)
+    # create_listing tries base slug -> IntegrityError, tries "_2" -> IntegrityError,
+    # and raises 409 Conflict.
+    res3 = listings_client.post(
+        "/api/v1/listings",
+        json={
+            "url": "https://www.flipkart.com/tata-pure-salt/p/itm123456789?pid=TATSALT001",
+            "title": "Pure Salt",
+            "brand": "Tata",
+            "pack_label": "1kg",
+            "category": "staples",
+            "family_key": "salt",
+            "listed_paise": 2900,
+            "mrp_paise": 3000,
+        },
+    )
+    assert res3.status_code == 409
+    assert "Product key collision could not be resolved" in res3.text
+

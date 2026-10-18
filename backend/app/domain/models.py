@@ -242,6 +242,12 @@ class CustomListing(SQLModel, table=True):
             unique=True,
             sqlite_where=text("archived = 0"),
         ),
+        Index(
+            "ix_custom_listing_household_product_key",
+            "household_id",
+            "product_key",
+            unique=True,
+        ),
     )
 
     id: int | None = Field(default=None, primary_key=True)
