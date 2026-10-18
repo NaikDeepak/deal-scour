@@ -29,3 +29,6 @@ dist/
 
 # agent-notepad (local only)
 .collab/
+
+# Local SQLite data (DEALSCOUR_DB_PATH default)
+data/
