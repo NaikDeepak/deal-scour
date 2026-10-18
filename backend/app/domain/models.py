@@ -82,3 +82,57 @@ class Offer(SQLModel, table=True):
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC)
     )
+
+
+class PlanRun(SQLModel, table=True):
+    __tablename__ = "plan_run"
+
+    id: int | None = Field(default=None, primary_key=True)
+    household_id: int = Field(foreign_key="household.id")
+    list_id: int | None = Field(default=None, foreign_key="shopping_list.id")
+    request_json: str
+    response_json: str
+    accepted_label: str | None = Field(default=None)
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC)
+    )
+
+
+class Basket(SQLModel, table=True):
+    __tablename__ = "basket"
+
+    id: int | None = Field(default=None, primary_key=True)
+    household_id: int = Field(foreign_key="household.id")
+    plan_run_id: int = Field(foreign_key="plan_run.id")
+    platform: str
+    status: str = Field(default="ready")  # "ready" | "pending" | "placed" | "settled" | "released"
+    target_offer_code: str | None = Field(default=None)
+    threshold_paise: int | None = Field(default=None)
+    shortfall_paise: int | None = Field(default=None)
+    planned_net_paise: int
+    offer_value_expected_paise: int = Field(default=0)
+    offers_json: str = Field(default="[]")
+    actual_paid_paise: int | None = Field(default=None)
+    offer_value_received_paise: int | None = Field(default=None)
+    placed_at: datetime | None = Field(default=None)
+    settled_at: datetime | None = Field(default=None)
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC)
+    )
+
+
+class BasketLine(SQLModel, table=True):
+    __tablename__ = "basket_line"
+
+    id: int | None = Field(default=None, primary_key=True)
+    basket_id: int = Field(foreign_key="basket.id", ondelete="CASCADE")
+    need_id: int | None = Field(default=None, foreign_key="need.id")
+    listing_id: str
+    line_id: str
+    title: str
+    pack_label: str
+    packs: int = Field(default=1)
+    unit_price_paise: int
+    line_total_paise: int
+    is_filler: bool = Field(default=False)
+
