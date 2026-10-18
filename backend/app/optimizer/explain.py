@@ -6,7 +6,7 @@ from app.core.money import Paise, format_inr
 from app.optimizer.contract import Offer
 from app.optimizer.offers import face_value
 from app.optimizer.pending import PendingOrder
-from app.optimizer.planning import Plan
+from app.optimizer.planning import Plan, PlannedLine
 from app.pricing.fee_schedules import Platform
 
 ReasonCode = Literal[
@@ -41,6 +41,16 @@ class Reason:
             raise ValueError(f"amount must be non-negative, got {self.amount}")
         if not isinstance(self.line_ids, tuple) or list(self.line_ids) != sorted(self.line_ids):
             object.__setattr__(self, "line_ids", tuple(sorted(self.line_ids)))
+
+
+def _can_split(order: tuple[PlannedLine, ...], threshold: Paise) -> bool:
+    """True if some subset of the order's lines totals in [threshold, subtotal - threshold]."""
+    totals = [pl.unit_price * pl.qty for pl in order]
+    upper = sum(totals) - threshold
+    sums = {0}
+    for t in totals:
+        sums |= {x + t for x in sums if x + t <= upper}
+    return any(threshold <= x <= upper for x in sums)
 
 
 def _reason_sort_key(r: Reason) -> tuple[int, str, tuple[str, ...], str]:
@@ -95,8 +105,9 @@ def explain(
             )
 
     # 2. DEAD_WEIGHT
-    # For an order in plan that has a flat offer f applied, where subtotal - f.min_order >= f.min_order
-    # and f.uses_left > the number of plan orders using f. amount = f.value.
+    # For an order in plan that has a flat offer f applied, where f.uses_left > the number of plan orders
+    # using f, AND the order's lines can really be divided into two orders that both reach f.min_order
+    # (a ₹1,009 order of ₹665 + ₹344 has ₹509 "excess" but no valid split). amount = f.value.
     offers_by_id = {o.id: o for o in offers}
     offer_use_count: dict[str, int] = {}
     for o_res in plan.result.orders:
@@ -109,7 +120,11 @@ def explain(
             f = offers_by_id.get(a.offer_id)
             if f is not None and f.kind == "flat":
                 excess = subtotal - f.min_order
-                if excess >= f.min_order and f.uses_left > offer_use_count.get(f.id, 0):
+                if (
+                    excess >= f.min_order
+                    and f.uses_left > offer_use_count.get(f.id, 0)
+                    and _can_split(order, f.min_order)
+                ):
                     amount = f.value
                     line_ids = tuple(sorted(pline.line_id for pline in order))
                     text = (
