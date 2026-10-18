@@ -18,7 +18,7 @@ Blinkit, Swiggy Instamart and Zepto that captures the *most offer value* for thi
 - **Savings ledger**: what you paid, offers captured, cashback still pending.
 
 ## Status
-🚧 **Phase 0 (foundation) in progress.** `backend/` has the FastAPI skeleton; the original prototype lives in `prototype/`:
+🚧 **Phase 1 in progress.** The backend has the pricing core, a deal grid API and the basket optimizer (3 plans with reasons, pending baskets, fillers). Next: the plans API and UI. The original prototype lives in `prototype/`:
 
 | File | |
 |---|---|

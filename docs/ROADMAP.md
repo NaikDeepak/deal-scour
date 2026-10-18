@@ -17,7 +17,8 @@
 - [ ] Lists + quick-add parser (rule-based) + product matching with confirmation.
 - [ ] Manual price entry and paste-a-link listing creation. Freshness badges.
 - [ ] Offer Wallet: templates for kinds 1–7 (`BASKET_OPTIMIZER.md` §3).
-- [ ] Optimizer: contract, baseline, heuristic, CP-SAT model, explanations. **Golden tests Ex 1–7**, plus property tests.
+- [x] Optimizer: contract, offers + exact evaluation, baseline, heuristic, pending + fillers, PlanSet + reasons. Golden Ex 1–7, property and brute-force tests. CP-SAT is deferred (ADR-023).
+- [ ] `POST /api/v1/plans` (in progress), then the Plans screen in `web/`.
 - [ ] Plans screen (3 plans, reasons, lock/tweak), accept → baskets.
 - [ ] Baskets screen: ready / pending with shortfall bar, fillers sheet, place and reconcile.
 - [ ] Deals grid + compare modal (ported UX).
