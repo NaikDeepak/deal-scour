@@ -14,6 +14,7 @@ export const PLATFORM_META: Record<Platform, { name: string; membership: string;
 export interface Deal {
   id: string
   product_key: string
+  family_key: string
   category: string
   title: string
   brand: string
@@ -25,6 +26,7 @@ export interface Deal {
   rate_basis_label: string
   eta_minutes: number
   is_best_in_product: boolean
+  is_best_in_family: boolean
 }
 
 export interface OfferIn {
@@ -43,9 +45,12 @@ export interface OfferIn {
   eligible_categories: string[] | null
 }
 
+// Exactly one of product_key (this exact pack) or family_key + quantity (any brand/pack, e.g. "5L").
 export interface NeedIn {
   line_id: string
-  product_key: string
+  product_key: string | null
+  family_key: string | null
+  quantity: string | null
   qty: number
   need_by_minutes: number | null
   lock_platform: Platform | null
@@ -80,8 +85,9 @@ export interface OrderOut {
     listing_id: string
     title: string
     pack_label: string
+    packs: number
     unit_price_paise: number
-    qty: number
+    line_total_paise: number
     is_filler: boolean
   }[]
   subtotal_paise: number
