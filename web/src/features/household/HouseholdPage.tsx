@@ -4,7 +4,7 @@ import { Card, ErrorNote, SectionTitle } from '../../lib/ui'
 
 export default function HouseholdPage({ me, onSignedOut }: { me: Me; onSignedOut: () => void }) {
   const [members, setMembers] = useState<Member[]>([])
-  const [invite, setInvite] = useState<{ link: string; expires: string } | null>(null)
+  const [newInvite, setNewInvite] = useState<{ link: string; expires: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(() => {
@@ -15,7 +15,7 @@ export default function HouseholdPage({ me, onSignedOut }: { me: Me; onSignedOut
   async function invite() {
     try {
       const { invite_code, expires_at } = await auth.invite()
-      setInvite({
+      setNewInvite({
         link: `${window.location.origin}/?invite=${encodeURIComponent(invite_code)}`,
         expires: new Date(expires_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }),
       })
@@ -67,12 +67,12 @@ export default function HouseholdPage({ me, onSignedOut }: { me: Me; onSignedOut
             <button type="button" onClick={invite} className="mt-3 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-bold text-white">
               Create invite link
             </button>
-            {invite && (
+            {newInvite && (
               <div className="mt-2 space-y-1 rounded-lg bg-amber-50 p-2 text-xs">
-                <p>Send this link to one family member. It works once, until {invite.expires}, and is shown only now:</p>
-                <code className="block select-all break-all rounded bg-white p-1.5">{invite.link}</code>
+                <p>Send this link to one family member. It works once, until {newInvite.expires}, and is shown only now:</p>
+                <code className="block select-all break-all rounded bg-white p-1.5">{newInvite.link}</code>
                 {'clipboard' in navigator && (
-                  <button type="button" onClick={() => void navigator.clipboard.writeText(invite.link)} className="font-semibold text-orange-700">
+                  <button type="button" onClick={() => void navigator.clipboard.writeText(newInvite.link)} className="font-semibold text-orange-700">
                     Copy link
                   </button>
                 )}
