@@ -28,6 +28,22 @@ export interface Deal {
   eta_minutes: number
   is_best_in_product: boolean
   is_best_in_family: boolean
+  listed_paise: number
+  mrp_paise: number
+  price_source: 'sample' | 'manual' | 'link' | 'extension' | 'fetcher'
+  observed_at: string | null
+  freshness: 'sample' | 'fresh' | 'ok' | 'stale'
+  in_stock: boolean
+}
+
+export interface PriceIn {
+  listing_id: string
+  listed_paise: number
+  mrp_paise: number
+  member_price_paise: number | null
+  in_stock: boolean
+  eta_minutes: number | null
+  note: string | null
 }
 
 export interface OfferIn {
@@ -241,4 +257,6 @@ export const api = {
   addLine: (id: number, listingId: string, lineId: string) =>
     call<Basket>(`/api/v1/baskets/${id}/lines`, json({ listing_id: listingId, line_id: lineId })),
   ledger: () => call<Ledger>('/api/v1/ledger/summary'),
+
+  observePrice: (p: PriceIn) => call<unknown>('/api/v1/prices', json(p)),
 }

@@ -1,13 +1,15 @@
 import BasketsPage from './features/baskets/BasketsPage'
 import OffersPage from './features/offers/OffersPage'
 import PlansPage from './features/plans/PlansPage'
+import PricesPage from './features/prices/PricesPage'
 import { usePreference } from './lib/preference'
 
-type Tab = 'plan' | 'baskets' | 'offers'
+type Tab = 'plan' | 'baskets' | 'offers' | 'prices'
 const TABS: { id: Tab; label: string }[] = [
   { id: 'plan', label: 'Plan' },
   { id: 'baskets', label: 'Baskets' },
   { id: 'offers', label: 'Offers' },
+  { id: 'prices', label: 'Prices' },
 ]
 
 export default function App() {
@@ -34,6 +36,7 @@ export default function App() {
       {tab === 'plan' && <PlansPage onAccepted={() => setTab('baskets')} />}
       {tab === 'baskets' && <BasketsPage />}
       {tab === 'offers' && <OffersPage />}
+      {tab === 'prices' && <PricesPage />}
     </main>
   )
 }
