@@ -8,7 +8,7 @@ from sqlmodel import Session
 from app.core import clock
 from app.core.db import current_household_id, get_session
 from app.core.money import Paise
-from app.domain.catalog import CurrentListing, SeedListing, current_listings
+from app.domain.catalog import CurrentListing, SeedListing, all_listings, current_listings
 from app.domain.need_rules import validate_need
 from app.optimizer.contract import Offer, OfferKind, ValueType
 from app.optimizer.pending import (
@@ -254,13 +254,15 @@ def run_plan(
     # Load current listings with observations applied
     current = current_listings(session=session, household_id=household_id, now=now_dt)
     current_by_id: dict[str, CurrentListing] = {cl.listing.id: cl for cl in current}
+    all_items = all_listings(session=session, household_id=household_id)
     seed_by_product: dict[str, list[SeedListing]] = {}
     seed_by_family: dict[str, list[SeedListing]] = {}
     current_by_product: dict[str, list[CurrentListing]] = {}
     current_by_family: dict[str, list[CurrentListing]] = {}
+    for item in all_items:
+        seed_by_product.setdefault(item.product_key, []).append(item)
+        seed_by_family.setdefault(item.family_key, []).append(item)
     for cur_item in current:
-        seed_by_product.setdefault(cur_item.listing.product_key, []).append(cur_item.listing)
-        seed_by_family.setdefault(cur_item.listing.family_key, []).append(cur_item.listing)
         current_by_product.setdefault(cur_item.listing.product_key, []).append(cur_item)
         current_by_family.setdefault(cur_item.listing.family_key, []).append(cur_item)
 
@@ -280,7 +282,7 @@ def run_plan(
                 family_key=need.family_key,
                 quantity=need.quantity,
                 qty=need.qty,
-                catalog=[c.listing for c in current],
+                catalog=all_items,
                 line_id=need.line_id,
             )
 

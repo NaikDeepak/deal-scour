@@ -3,12 +3,12 @@ import importlib.resources
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Literal
+from typing import Literal, cast
 
 from sqlmodel import Session, col, select
 
 from app.core.money import Paise
-from app.domain.models import PriceObservation
+from app.domain.models import CustomListing, PriceObservation
 from app.pricing.fee_schedules import Platform
 from app.pricing.landed import ItemPrice
 from app.pricing.units import Pack, Unit, default_basis, parse_pack
@@ -149,6 +149,62 @@ def current_listings(
                     in_stock=matched_obs.in_stock,
                 )
             )
+
+    custom_listings = session.exec(
+        select(CustomListing).where(
+            CustomListing.household_id == household_id,
+            CustomListing.archived.is_(False),  # type: ignore[attr-defined]
+        )
+    ).all()
+
+    for custom in custom_listings:
+        matched_obs = latest_by_listing.get(custom.listing_id)
+        if matched_obs is None:
+            # Custom listing's price comes ONLY from observations
+            continue
+
+        is_instant = custom.platform in {"blinkit", "instamart", "zepto"}
+        member_discount = (
+            matched_obs.listed_paise - matched_obs.member_price_paise
+            if matched_obs.member_price_paise is not None
+            else 0
+        )
+        eta = (
+            matched_obs.eta_minutes
+            if matched_obs.eta_minutes is not None
+            else (15 if is_instant else 1440)
+        )
+        custom_seed_listing = SeedListing(
+            id=custom.listing_id,
+            product_key=custom.product_key,
+            family_key=custom.family_key,
+            category=custom.category,
+            title=custom.title,
+            brand=custom.brand,
+            pack_label=custom.pack_label,
+            platform=cast(Platform, custom.platform),
+            listed=matched_obs.listed_paise,
+            mrp=matched_obs.mrp_paise,
+            member_discount=member_discount,
+            eta_minutes=eta,
+            is_instant=is_instant,
+            coupon_text=None,
+            url=custom.url,
+            icon=custom.icon,
+            source="manual",
+        )
+        freshness = compute_freshness(custom.platform, matched_obs.observed_at, now)
+        source_val = "manual" if matched_obs.source == "manual" else "sample"
+        result.append(
+            CurrentListing(
+                listing=custom_seed_listing,
+                source=source_val,
+                observed_at=matched_obs.observed_at,
+                freshness=freshness,
+                in_stock=matched_obs.in_stock,
+            )
+        )
+
     return result
 
 
@@ -192,3 +248,43 @@ def rate_basis(category: str, unit: Unit) -> tuple[int, str]:
     if category == "dryfruits" and unit == "g":
         return (100, "100g")
     return default_basis(unit)
+
+
+def all_listings(
+    session: Session,
+    household_id: int,
+) -> list[SeedListing]:
+    """Return all seed listings plus all custom listings for this household."""
+    seed = load_seed()
+    custom_listings = session.exec(
+        select(CustomListing).where(
+            CustomListing.household_id == household_id,
+        )
+    ).all()
+
+    result: list[SeedListing] = list(seed)
+    for custom in custom_listings:
+        is_instant = custom.platform in {"blinkit", "instamart", "zepto"}
+        result.append(
+            SeedListing(
+                id=custom.listing_id,
+                product_key=custom.product_key,
+                family_key=custom.family_key,
+                category=custom.category,
+                title=custom.title,
+                brand=custom.brand,
+                pack_label=custom.pack_label,
+                platform=cast(Platform, custom.platform),
+                listed=0,
+                mrp=0,
+                member_discount=0,
+                eta_minutes=15 if is_instant else 1440,
+                is_instant=is_instant,
+                coupon_text=None,
+                url=custom.url,
+                icon=custom.icon,
+                source="manual",
+            )
+        )
+    return result
+

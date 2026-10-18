@@ -8,7 +8,7 @@ from sqlmodel import Session, col, select
 from app.core import clock
 from app.core.db import current_household_id, get_session
 from app.core.money import Paise
-from app.domain.catalog import load_seed
+from app.domain.catalog import all_listings
 from app.domain.models import PriceObservation
 
 router = APIRouter()
@@ -29,9 +29,6 @@ class PriceObservationCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_fields(self) -> "PriceObservationCreate":
-        seed_ids = {item.id for item in load_seed()}
-        if self.listing_id not in seed_ids:
-            raise ValueError(f"Unknown listing_id: {self.listing_id}")
         if self.listed_paise <= 0:
             raise ValueError(f"listed_paise must be positive, got {self.listed_paise}")
         if self.mrp_paise < self.listed_paise:
@@ -72,6 +69,10 @@ def create_price_observation(
     session: SessionDep,
     now_dt: ClockDep,
 ) -> PriceObservation:
+    valid_ids = {item.id for item in all_listings(session=session, household_id=household_id)}
+    if req.listing_id not in valid_ids:
+        raise HTTPException(status_code=422, detail=f"Unknown listing_id: {req.listing_id}")
+
     obs = PriceObservation(
         household_id=household_id,
         listing_id=req.listing_id,
@@ -96,8 +97,8 @@ def get_price_observations(
     session: SessionDep,
     listing_id: str = Query(...),
 ) -> list[PriceObservation]:
-    seed_ids = {item.id for item in load_seed()}
-    if listing_id not in seed_ids:
+    valid_ids = {item.id for item in all_listings(session=session, household_id=household_id)}
+    if listing_id not in valid_ids:
         raise HTTPException(status_code=422, detail=f"Unknown listing_id: {listing_id}")
 
     observations = session.exec(
