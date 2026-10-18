@@ -42,3 +42,18 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t dealscour:ci .
+      - name: Boot and smoke-test
+        run: |
+          docker run -d --name ds -p 8000:8000 dealscour:ci
+          for i in $(seq 1 30); do curl -fsS localhost:8000/api/v1/health && break; sleep 1; done
+          curl -fsS localhost:8000/ | grep -qi "<html"
+          curl -fsS -X POST localhost:8000/api/v1/lists -H 'content-type: application/json' -d '{"name":"CI","kind":"quick"}'
+          curl -fsS localhost:8000/api/v1/lists | grep -q '"CI"'
+          docker logs ds | tail -20
