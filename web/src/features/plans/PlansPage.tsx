@@ -68,7 +68,10 @@ export default function PlansPage() {
 
   function addNeed(key: string) {
     if (!key || needs.some((n) => n.product_key === key)) return
-    setNeeds([...needs, { line_id: key, product_key: key, qty: 1, need_by_minutes: null, lock_platform: null }])
+    // line_id is what reasons mention ("Ariel 2L moved to Zepto…"), so make it readable.
+    const p = productByKey.get(key)
+    const lineId = p ? `${p.brand} ${p.pack}` : key
+    setNeeds([...needs, { line_id: lineId, product_key: key, qty: 1, need_by_minutes: null, lock_platform: null }])
     setResult(null)
   }
 

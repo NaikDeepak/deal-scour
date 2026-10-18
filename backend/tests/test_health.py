@@ -13,3 +13,10 @@ def test_deals_router_is_mounted() -> None:
     res = TestClient(app).get("/api/v1/deals", params={"q": "aashirvaad"})
     assert res.status_code == 200
     assert res.json()["count"] == 3
+
+
+def test_plans_router_is_mounted() -> None:
+    body = {"needs": [{"line_id": "atta", "product_key": "aashirvaad_atta", "qty": 1}]}
+    res = TestClient(app).post("/api/v1/plans", json=body)
+    assert res.status_code == 200
+    assert res.json()["plans"][0]["label"] == "cheapest_now"
