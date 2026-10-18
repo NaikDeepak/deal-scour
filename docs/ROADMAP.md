@@ -13,14 +13,13 @@
 **Exit:** `GET /deals` returns correct membership-aware landed prices and unit rates, with order-level fees shown separately. ✅ Met 2026-10-18 (`GET /api/v1/deals`).
 
 ## Phase 1: MVP: lists, offers, optimizer, pending baskets (≈ 3 weeks)
-- [ ] Auth (email OTP, invite link), single household.
-- [ ] Lists + quick-add parser (rule-based) + product matching with confirmation.
-- [ ] Manual price entry and paste-a-link listing creation. Freshness badges.
-- [ ] Offer Wallet: templates for kinds 1–7 (`BASKET_OPTIMIZER.md` §3).
+- [x] Auth (email code, invite link), single household per user (#auth PR).
+- [x] Saved lists with exact products or "any brand" family needs (product picker). [ ] Free-text quick-add parser.
+- [x] Manual price entry with freshness and stock badges. [ ] Paste-a-link listing creation (new products beyond the seed).
+- [x] Offer Wallet (saved): flat and %-cap templates in the UI. Tiered and category offers via the API.
 - [x] Optimizer: contract, offers + exact evaluation, baseline, heuristic, pending + fillers, PlanSet + reasons. Golden Ex 1–7, property and brute-force tests. CP-SAT is deferred (ADR-023).
-- [ ] `POST /api/v1/plans` (in progress), then the Plans screen in `web/`.
-- [ ] Plans screen (3 plans, reasons, lock/tweak), accept → baskets.
-- [ ] Baskets screen: ready / pending with shortfall bar, fillers sheet, place and reconcile.
+- [x] `POST /api/v1/plans` and saved-list planning. Plans screen: 3 plans, reasons, accept → baskets. [ ] Lock/tweak controls.
+- [x] Baskets: ready / pending with shortfall bar, top-up, place, release, cashback; monthly ledger.
 - [ ] Deals grid + compare modal (ported UX).
 
 **Exit:** I plan a real monthly shop with it and capture the ₹50 + ₹50 split.
@@ -30,7 +29,7 @@
 - [ ] Web Push + Telegram bot (`/add`, `/list`, `/pending`), quiet hours, dedupe.
 - [ ] Restock cadences (manual, then learned from placed baskets). Filler pool v1.
 - [ ] Pending basket nudges (ready, T-48 h, T-12 h), offer expiry reminders.
-- [ ] Savings ledger + monthly dashboard. Cashback received/missed tracking.
+- [~] Monthly ledger (paid, offers earned, cashback pending) is done. [ ] Missed-cashback tracking and savings vs baseline.
 
 **Exit:** The family adds items from their phones. Alerts are correct with zero false hits.
 

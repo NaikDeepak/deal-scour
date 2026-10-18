@@ -15,6 +15,8 @@ git clone https://github.com/NaikDeepak/deal-scour.git && cd deal-scour
 cp .env.example .env
 # Edit .env:
 #   DEALSCOUR_SECRET_KEY   → output of: python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+#   DEALSCOUR_OWNER_EMAIL  → your email (you'll be the household owner)
+#   SMTP_*                 → any SMTP provider, used to email sign-in codes
 #   DEALSCOUR_DOMAIN       → deals.example.com (omit for http://localhost)
 #   everything else is optional; leave empty to keep that feature off
 ```
@@ -24,7 +26,8 @@ cp .env.example .env
 docker compose up -d --build
 docker compose logs -f app        # migrations run automatically on start
 ```
-Open `https://<your domain>` (or `http://localhost`). On a phone, use **Add to Home Screen** to install it like an app.
+Open `https://<your domain>` (or `http://localhost`) and sign in with `DEALSCOUR_OWNER_EMAIL`. Invite family from the **Family** tab.
+On a phone, use **Add to Home Screen** to install it like an app.
 
 ## 4. Back up (do this)
 The database lives in the `dealscour-data` volume. Add a nightly backup on the host:
