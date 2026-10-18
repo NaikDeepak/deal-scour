@@ -11,13 +11,13 @@ export interface Product {
   best: Deal
 }
 
-export function useProducts(members: Platform[]) {
+export function useProducts(members: Platform[], refreshKey = 0) {
   const [deals, setDeals] = useState<Deal[]>([])
   useEffect(() => {
     fetchDeals(members)
       .then((r) => setDeals(r.deals))
       .catch(() => setDeals([]))
-  }, [members])
+  }, [members, refreshKey])
   const products = useMemo(() => {
     const byKey = new Map<string, Product>()
     for (const d of deals) {
