@@ -1,3 +1,5 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Request
@@ -5,16 +7,38 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import IntegrityError
 
-from app.api.v1 import auth, baskets, deals, households, listings, lists, offers, plans, prices
+from app.api.v1 import auth, baskets, deals, households, listings, lists, offers, plans, prices, sources
 from app.core.config import get_settings
+from app.core.db import get_engine
 from app.core.security import verify_csrf
+from app.sources.fetcher import setup_fetcher_loop
 
-app = FastAPI(title="DealScour", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # Price fetcher for Amazon/Flipkart custom listings; only when DEALSCOUR_FETCHERS=1 (ADR-004).
+    stop = setup_fetcher_loop(app, get_settings(), get_engine())
+    yield
+    if stop is not None:
+        stop.set()
+
+
+app = FastAPI(title="DealScour", version="0.1.0", lifespan=lifespan)
 # Every router gets the CSRF check (X-DealScour: 1 on POST/PATCH/PUT/DELETE). Data routers also need a session
 # through current_household_id; tests/test_auth_coverage.py walks every route to prove nothing is left open.
 _csrf = [Depends(verify_csrf)]
-for _router in (auth.router, households.router, deals.router, plans.router, lists.router, offers.router,
-                baskets.router, prices.router, listings.router):
+for _router in (
+    auth.router,
+    households.router,
+    deals.router,
+    plans.router,
+    lists.router,
+    offers.router,
+    baskets.router,
+    prices.router,
+    listings.router,
+    sources.router,
+):
     app.include_router(_router, prefix="/api/v1", dependencies=_csrf)
 
 

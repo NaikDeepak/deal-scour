@@ -120,17 +120,15 @@ def test_10_api_sources_refresh_permissions_and_concurrency(
         s.commit()
 
     # 1. As member -> 403 Forbidden
-    test_app.dependency_overrides[current_user] = (
-        lambda: AppUser(id=member_id, email="member@dealscour.local")
+    test_app.dependency_overrides[current_user] = lambda: AppUser(
+        id=member_id, email="member@dealscour.local"
     )
     with TestClient(test_app) as client:
         resp = client.post("/api/v1/sources/refresh", headers={"X-DealScour": "1"})
         assert resp.status_code == 403
 
     # 2. As owner -> 202 Accepted with queued count
-    test_app.dependency_overrides[current_user] = (
-        lambda: AppUser(id=owner_id, email="owner@dealscour.local")
-    )
+    test_app.dependency_overrides[current_user] = lambda: AppUser(id=owner_id, email="owner@dealscour.local")
     with TestClient(test_app) as client:
         resp = client.post("/api/v1/sources/refresh", headers={"X-DealScour": "1"})
         assert resp.status_code == 202
@@ -138,6 +136,7 @@ def test_10_api_sources_refresh_permissions_and_concurrency(
 
     # 3. Concurrent call while a refresh is in progress -> 409 Conflict
     from app.api.v1 import sources
+
     sources._in_progress_households.add(1)
     try:
         with TestClient(test_app) as client:
@@ -148,23 +147,43 @@ def test_10_api_sources_refresh_permissions_and_concurrency(
         sources._in_progress_households.discard(1)
 
 
-def test_11_fetchers_enabled_scheduling(test_app: FastAPI, tmp_path: Any) -> None:
-    # When fetchers_enabled is False: no loop registered
-    disabled_settings = Settings(
-        db_path=tmp_path / "test.db",
-        secret_key="a" * 32,
-        fetchers_enabled=False,
-    )
-    res_disabled = setup_fetcher_loop(test_app, disabled_settings)
-    assert res_disabled is None
+def test_11_fetchers_enabled_scheduling(test_app: FastAPI, tmp_path: Any, monkeypatch: Any) -> None:
+    import threading
+
+    from app.sources import fetcher as fetcher_module
+
+    disabled_settings = Settings(db_path=tmp_path / "test.db", secret_key="a" * 32, fetchers_enabled=False)
+    assert setup_fetcher_loop(test_app, disabled_settings) is None
     assert getattr(test_app.state, "fetcher_loop_registered", False) is False
 
-    # When fetchers_enabled is True: loop is registered (not run in tests)
-    enabled_settings = Settings(
-        db_path=tmp_path / "test.db",
-        secret_key="a" * 32,
-        fetchers_enabled=True,
-    )
-    res_enabled = setup_fetcher_loop(test_app, enabled_settings)
-    assert res_enabled is not None
+    # Enabled: exactly one worker thread is started (worker stubbed so nothing is fetched in tests)
+    calls: list[int] = []
+    monkeypatch.setattr(fetcher_module, "run_fetcher_worker", lambda engine, hours, stop: calls.append(hours))
+    monkeypatch.setattr(fetcher_module, "_LOOP_STARTED", threading.Event())
+    enabled_settings = Settings(db_path=tmp_path / "test.db", secret_key="a" * 32, fetchers_enabled=True)
+    stop = setup_fetcher_loop(test_app, enabled_settings, engine=object())  # type: ignore[arg-type]
+    assert stop is not None
     assert getattr(test_app.state, "fetcher_loop_registered", False) is True
+    assert setup_fetcher_loop(test_app, enabled_settings, engine=object()) is None  # never a second loop
+    for _ in range(50):
+        if calls:
+            break
+        threading.Event().wait(0.01)
+    assert calls == [enabled_settings.fetch_interval_hours]
+
+
+def test_fetch_url_refuses_foreign_hosts_and_redirects() -> None:
+    import pytest
+
+    from app.sources.fetcher import FetchRefusedError, _check_url
+
+    _check_url("https://www.amazon.in/dp/B072HG4WNC")
+    _check_url("https://www.flipkart.com/x/p/itmabcdef?pid=ABCDEFGH")
+    for bad in (
+        "http://www.amazon.in/dp/B072HG4WNC",
+        "https://127.0.0.1:8000/",
+        "https://amazon.in.evil.com/",
+        "https://blinkit.com/prn/x/prid/1",
+    ):
+        with pytest.raises(FetchRefusedError):
+            _check_url(bad)

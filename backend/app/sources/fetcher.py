@@ -7,6 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from urllib.parse import urljoin, urlsplit
 
 from sqlalchemy.engine import Engine
 from sqlmodel import Session, col, select
@@ -32,6 +33,22 @@ class RefreshReport:
     skipped_platforms: list[str] = field(default_factory=list)
 
 
+# Only these hosts are ever requested, including after redirects (no SSRF via a redirect).
+ALLOWED_FETCH_HOSTS = frozenset({"www.amazon.in", "amazon.in", "www.flipkart.com", "flipkart.com"})
+MAX_REDIRECTS = 3
+MAX_BODY_BYTES = 6 * 1024 * 1024
+
+
+class FetchRefusedError(Exception):
+    """Redirect to a host we don't fetch, non-https, or an oversized page."""
+
+
+def _check_url(url: str) -> None:
+    parts = urlsplit(url)
+    if parts.scheme != "https" or (parts.hostname or "").lower() not in ALLOWED_FETCH_HOSTS:
+        raise FetchRefusedError(f"refusing to fetch {parts.scheme}://{parts.hostname}")
+
+
 def fetch_url(url: str) -> tuple[int, str]:
     import httpx
 
@@ -39,9 +56,20 @@ def fetch_url(url: str) -> tuple[int, str]:
         "User-Agent": DEFAULT_USER_AGENT,
         "Accept-Language": "en-IN,en;q=0.9",
     }
-    with httpx.Client(timeout=15.0, headers=headers, follow_redirects=True) as client:
-        resp = client.get(url)
-        return resp.status_code, resp.text
+    with httpx.Client(timeout=15.0, headers=headers, follow_redirects=False) as client:
+        for _ in range(MAX_REDIRECTS + 1):
+            _check_url(url)
+            with client.stream("GET", url) as resp:
+                if resp.is_redirect:
+                    url = urljoin(url, resp.headers.get("location", ""))
+                    continue
+                body = bytearray()
+                for chunk in resp.iter_bytes():
+                    body.extend(chunk)
+                    if len(body) > MAX_BODY_BYTES:
+                        raise FetchRefusedError("page larger than 6 MB")
+                return resp.status_code, body.decode(resp.encoding or "utf-8", errors="replace")
+        raise FetchRefusedError("too many redirects")
 
 
 def _handle_platform_failure(
@@ -113,7 +141,30 @@ def get_due_listings(
     return [item[3] for item in due[:limit]]
 
 
+# One fetch run at a time per process (background loop, manual refresh, every household), so requests to a
+# site are always sequential and spaced, never parallel.
+_RUN_LOCK = threading.Lock()
+
+
 def refresh_due_listings(
+    session: Session,
+    household_id: int,
+    *,
+    http_get: Callable[[str], tuple[int, str]],
+    now: Callable[[], datetime],
+    sleep: Callable[[float], None],
+    interval_hours: int,
+) -> RefreshReport:
+    with _RUN_LOCK:
+        report = _refresh_due_listings(
+            session, household_id, http_get=http_get, now=now, sleep=sleep, interval_hours=interval_hours
+        )
+        if report.fetched:
+            sleep(10.0)  # keep the 10 s gap to whichever run takes the lock next
+        return report
+
+
+def _refresh_due_listings(
     session: Session,
     household_id: int,
     *,
@@ -253,12 +304,28 @@ def refresh_due_listings(
     return report
 
 
+_LOOP_STARTED = threading.Event()
+
+
 def setup_fetcher_loop(app: Any, settings: Settings, engine: Engine | None = None) -> Any:
-    """Register fetcher loop on app state if fetchers_enabled is True."""
+    """Start the single background fetch loop when DEALSCOUR_FETCHERS=1. Returns the stop event (or None)."""
     if not settings.fetchers_enabled:
         return None
     app.state.fetcher_loop_registered = True
-    return True
+    if engine is None or _LOOP_STARTED.is_set():
+        return None
+    _LOOP_STARTED.set()
+    stop = threading.Event()
+    threading.Thread(
+        target=run_fetcher_worker,
+        args=(engine, settings.fetch_interval_hours, stop),
+        name="dealscour-fetcher",
+        daemon=True,
+    ).start()
+    logger.info(
+        "Price fetcher enabled: Amazon + Flipkart custom listings every %sh", settings.fetch_interval_hours
+    )
+    return stop
 
 
 def run_fetcher_worker(
