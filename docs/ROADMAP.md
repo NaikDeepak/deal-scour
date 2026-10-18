@@ -4,7 +4,8 @@
 
 ## Phase 0: Foundation (≈ 1 week)
 - [x] `git init`, move prototype files → `prototype/` (ADR-018), and strip nothing.
-- [x] Scaffold `backend/` (venv+pip, FastAPI, SQLModel, Alembic, ruff, mypy, pytest) and `web/` (Vite, React, TS, Tailwind, PWA plugin).
+- [x] Scaffold `backend/` (venv+pip, FastAPI, ruff, mypy, pytest) and `web/` (Vite, React, TS, Tailwind v4, vitest).
+- [ ] Deferred to Phase 1: SQLModel + Alembic (first DB-backed feature) and the PWA plugin (with the first real screen).
 - [x] `core/money.py` (paise helpers), `pricing/units.py`, `pricing/fee_schedules.py`, `pricing/landed.py` with tests.
 - [x] Seed file with the 28 prototype listings as `source="sample"` (walnuts get their own product) → `backend/app/seed/prototype_catalog.json`.
 - [ ] `docker-compose.yml` + Caddy, running locally.
