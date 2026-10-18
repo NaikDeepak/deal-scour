@@ -22,12 +22,14 @@ Home pincode: 411018 (Pimpri-Chinchwad). The design supports multiple households
 
 | Path | State |
 |---|---|
-| `dealscour_v3.html` | **Prototype / reference only.** Single-file Tailwind UI with mocked data. Do not extend it. |
-| `deal_scour_backend.py` | **Prototype / reference only.** Mock catalog + wishlist scan. Do not extend it. |
+| `prototype/dealscour_v3.html` | **Prototype / reference only.** Single-file Tailwind UI with mocked data. Do not extend it. |
+| `prototype/deal_scour_backend.py` | **Prototype / reference only.** Mock catalog + wishlist scan. Do not extend it. |
 | `docs/` | Source of truth for product, architecture, flows, decisions. |
-| `backend/`, `web/` | **Not yet scaffolded.** Target layout is in `docs/ARCHITECTURE.md` §3. |
+| `backend/` | **Phase 0.** FastAPI skeleton + pricing core. Target layout in `docs/ARCHITECTURE.md` §3. |
+| `web/` | **Not yet scaffolded.** |
+| `docs/tasks/` | Task specs the lead writes for builders (agent-notepad). |
 
-⚠️ **`dealscour_v3.html` line 136 is an ~870 KB base64 JPEG.** Never `cat` or fully read the file.
+⚠️ **`prototype/dealscour_v3.html` line 136 is an ~870 KB base64 JPEG.** Never `cat` or fully read the file.
 Use `grep -n` / `sed -n 'A,Bp' | cut -c1-200`. JS lives at lines ~972–2691.
 
 ## 3. Read order
@@ -105,7 +107,7 @@ pnpm test && pnpm lint && pnpm typecheck
 docker compose up --build
 ```
 
-Prototype only: `python3 deal_scour_backend.py`, or open `dealscour_v3.html` in a browser.
+Prototype only: `python3 prototype/deal_scour_backend.py`, or open `prototype/dealscour_v3.html` in a browser.
 
 ## 7. Task playbooks
 

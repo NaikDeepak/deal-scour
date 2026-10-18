@@ -18,12 +18,12 @@ Blinkit, Swiggy Instamart and Zepto that captures the *most offer value* for thi
 - **Savings ledger**: what you paid, offers captured, cashback still pending.
 
 ## Status
-🚧 **Design complete, build not started.** The current files are a clickable prototype with mocked data:
+🚧 **Phase 0 (foundation) in progress.** `backend/` has the FastAPI skeleton; the original prototype lives in `prototype/`:
 
 | File | |
 |---|---|
-| `dealscour_v3.html` | UI prototype (open in a browser) |
-| `deal_scour_backend.py` | Mock pricing + wishlist scan (`python3 deal_scour_backend.py`) |
+| `prototype/dealscour_v3.html` | UI prototype (open in a browser) |
+| `prototype/deal_scour_backend.py` | Mock pricing + wishlist scan (`python3 prototype/deal_scour_backend.py`) |
 
 ## Docs
 | Doc | Read it for |
