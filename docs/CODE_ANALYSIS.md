@@ -25,7 +25,7 @@
 | **Architecture** | Static explainer + Python script with copy button | — |
 | "Live scour" | 3-step `setInterval` progress animation; **no network** | `triggerLiveScour` (~2365) |
 
-Data: `DEALS_DATABASE` holds 35 listings across 12 `itemGroup`s (Amazon 10, Flipkart 6, Instamart 6, Blinkit 3, Zepto 3).
+Data: `DEALS_DATABASE` holds 28 listings across 13 `itemGroup`s (Amazon 10, Flipkart 6, Instamart 6, Blinkit 3, Zepto 3).
 State: `appState` with memberships, cart, wishlist and cron logs. Cart, memberships, wishlist and theme persist to localStorage (`*_v3` keys).
 
 ### Backend (`deal_scour_backend.py`)
@@ -57,7 +57,7 @@ State: `appState` with memberships, cart, wishlist and cron logs. Cart, membersh
 | D6 | Med | HTML `DEALS_DATABASE` | `wal-1` (Nutraj **walnuts**) has `itemGroup: "california_almonds"`, so walnuts compete with almonds. | Need → Product → Listing hierarchy |
 | D7 | Med | HTML compare modal | Peers = same group **or same category**, so atta is compared with rice and oil. | Peers = same product, or the same flexible need |
 | D8 | Med | Both | No real data: "live scour" is an animation, the pincode change only renames the label ("Pimpri-Chinchwad {pin}" for any pin), and the cron schedule select is cosmetic. Python `__main__` uses no scheduler or persistence. | Adapters + APScheduler + DB (ADR-004, ADR-014) |
-| D9 | Med | Both | Pricing logic is duplicated in Python and JS with different data (8 vs 35 items) and rounding (`round(x,1)` vs `Math.round`). | One server-side implementation, paise (ADR-009, ADR-019) |
+| D9 | Med | Both | Pricing logic is duplicated in Python and JS with different data (8 vs 28 items) and rounding (`round(x,1)` vs `Math.round`). | One server-side implementation, paise (ADR-009, ADR-019) |
 | D10 | Med | HTML everywhere | Strings are built into `innerHTML`, including user-entered watch text and (in future) scraped titles. That's an XSS risk once data is shared between family members. | Framework escaping, CSP |
 | D11 | Med | Python | `triggered = price ≤ target OR discount ≥ min`. A 20% "discount" on an inflated MRP triggers even far above target. | Explicit ANY/ALL rule; unit-rate targets |
 | D12 | Low | HTML cart | No quantities. One unit per listing. A duplicate add toggles it off. | `basket_line.qty` |
@@ -82,5 +82,5 @@ State: `appState` with memberships, cart, wishlist and cron logs. Cart, membersh
 | Toasts, theme, pincode modal | `web/src/app/*` |
 
 ## 6. Seed data to carry over
-The 35 prototype listings are a useful sample catalog for development. Import them via `backend/scripts/seed_from_prototype.py`
+The 28 prototype listings are a useful sample catalog for development. They are extracted to `backend/app/seed/prototype_catalog.json`
 with `source="sample"`, after fixing D6 (walnuts get their own product). They make the UI usable on day one and give realistic golden-test inputs.
