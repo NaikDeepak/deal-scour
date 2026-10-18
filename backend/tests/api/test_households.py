@@ -61,6 +61,7 @@ def household_app(
 @pytest.fixture
 def client(household_app: FastAPI) -> Generator[TestClient, None, None]:
     with TestClient(household_app) as c:
+        c.headers["X-DealScour"] = "1"
         yield c
 
 
@@ -211,3 +212,50 @@ def test_6_member_permissions_and_removal(
     client.cookies.set("ds_session", alice_token)
     r_alice_me = client.get("/api/v1/auth/me")
     assert r_alice_me.status_code == 401
+
+
+def test_15_atomic_invite_claim_and_expiry_for_existing_user(
+    client: TestClient,
+    capturing_sender: CapturingEmailSender,
+    test_clock: dict[str, datetime],
+    engine: Engine,
+) -> None:
+    # 15. Invite race + expiry: claim atomically with UPDATE rowcount == 1
+    # Bootstrap owner
+    client.post("/api/v1/auth/request-code", json={"email": "owner@dealscour.local"})
+    code_owner = capturing_sender.sent[-1][1]
+    client.post("/api/v1/auth/verify", json={"email": "owner@dealscour.local", "code": code_owner})
+
+    # Owner creates invite
+    r_inv = client.post("/api/v1/households/invites")
+    invite_code = r_inv.json()["invite_code"]
+
+    # Pre-create an existing user without household in DB
+    from app.domain.models import AppUser
+    with Session(engine) as s:
+        existing_user = AppUser(
+            email="existing@family.local",
+            name="Existing Member",
+            created_at=datetime.now(UTC),
+        )
+        s.add(existing_user)
+        s.commit()
+
+    # Expire the invite (+8 days)
+    test_clock["now"] += timedelta(days=8)
+
+    # Existing user requests code with expired invite
+    client.post("/api/v1/auth/request-code", json={"email": "existing@family.local"})
+    code_user = capturing_sender.sent[-1][1]
+
+    # Verify with expired invite code -> 400
+    r_ver_exp = client.post(
+        "/api/v1/auth/verify",
+        json={
+            "email": "existing@family.local",
+            "code": code_user,
+            "invite_code": invite_code,
+        },
+    )
+    assert r_ver_exp.status_code == 400
+    assert "Invalid or expired invite" in r_ver_exp.json()["detail"]

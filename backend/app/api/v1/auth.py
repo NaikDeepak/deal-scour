@@ -1,8 +1,10 @@
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+import sqlalchemy as sa
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, func, select
 
 from app.core import clock
@@ -28,6 +30,8 @@ SettingsDep = Annotated[Settings, Depends(get_settings)]
 SessionDep = Annotated[Session, Depends(get_session)]
 EmailSenderDep = Annotated[EmailSender, Depends(get_email_sender)]
 ClockDep = Annotated[datetime, Depends(clock.now)]
+CurrentUserDep = Annotated[AppUser, Depends(current_user)]
+CsrfDep = Annotated[None, Depends(verify_csrf)]
 
 
 class RequestCodeRequest(BaseModel):
@@ -54,15 +58,31 @@ class AuthOut(BaseModel):
     role: str
 
 
+def _get_24h_failed_attempts(session: Session, email: str, now_dt: datetime) -> int:
+    twenty_four_hours_ago = now_dt - timedelta(hours=24)
+    stmt = select(func.coalesce(func.sum(col(LoginCode.attempts)), 0)).where(
+        LoginCode.email == email,
+        LoginCode.created_at >= twenty_four_hours_ago,
+    )
+    result = session.exec(stmt).one()
+    return int(result or 0)
+
+
 @router.post("/auth/request-code", status_code=status.HTTP_202_ACCEPTED)
 def request_code(
     req: RequestCodeRequest,
+    background_tasks: BackgroundTasks,
     session: SessionDep,
     settings: SettingsDep,
     sender: EmailSenderDep,
     now_dt: ClockDep,
+    _csrf: CsrfDep,
 ) -> dict[str, bool]:
     email = req.email.strip().lower()
+
+    # Timing resistance: always generate code & compute HMAC regardless of eligibility
+    candidate_code = generate_login_code()
+    candidate_hash = hash_login_code(email, candidate_code, settings.secret_key)
 
     # 1. Determine eligibility without account enumeration
     eligible = False
@@ -70,7 +90,6 @@ def request_code(
     if existing_user is not None:
         eligible = True
     elif settings.owner_email and email == settings.owner_email:
-        # Eligible if owner_email and no owner exists yet
         owner_member = session.exec(
             select(HouseholdMember).where(HouseholdMember.role == "owner")
         ).first()
@@ -89,7 +108,12 @@ def request_code(
     if not eligible:
         return {"sent": True}
 
-    # 2. Rate limit: at most 5 codes per email per hour
+    # 2. Email-wide brute-force budget: 24h failed attempts >= 10 silences sending
+    failed_attempts_24h = _get_24h_failed_attempts(session, email, now_dt)
+    if failed_attempts_24h >= 10:
+        return {"sent": True}
+
+    # 3. Rate limit: at most 5 codes per email per hour
     one_hour_ago = now_dt - timedelta(hours=1)
     count = session.exec(
         select(func.count(col(LoginCode.id))).where(
@@ -100,12 +124,10 @@ def request_code(
     if count >= 5:
         return {"sent": True}
 
-    # 3. Generate code and persist HMAC
-    code = generate_login_code()
-    code_hash = hash_login_code(email, code, settings.secret_key)
+    # 4. Persist code and send email in background task
     login_code_row = LoginCode(
         email=email,
-        code_hash=code_hash,
+        code_hash=candidate_hash,
         expires_at=now_dt + timedelta(minutes=10),
         attempts=0,
         used_at=None,
@@ -114,7 +136,7 @@ def request_code(
     session.add(login_code_row)
     session.commit()
 
-    sender.send_login_code(email, code)
+    background_tasks.add_task(sender.send_login_code, email, candidate_code)
     return {"sent": True}
 
 
@@ -125,8 +147,17 @@ def verify(
     session: SessionDep,
     settings: SettingsDep,
     now_dt: ClockDep,
+    _csrf: CsrfDep,
 ) -> AuthOut:
     email = req.email.strip().lower()
+
+    # Email-wide brute-force budget: 24h failed attempts >= 10 locks out verification
+    failed_attempts_24h = _get_24h_failed_attempts(session, email, now_dt)
+    if failed_attempts_24h >= 10:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired code",
+        )
 
     # Look up most recent unused login code for this email
     code_row = session.exec(
@@ -141,7 +172,7 @@ def verify(
             detail="Invalid or expired code",
         )
 
-    # After 5 wrong attempts, the code is dead
+    # After 5 wrong attempts on this code, the code is dead
     if code_row.attempts >= 5:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -177,22 +208,36 @@ def verify(
 
     if user is None:
         if settings.owner_email and email == settings.owner_email:
-            # Owner bootstrap
-            user = AppUser(
-                email=email,
-                name=req.name,
-                created_at=now_dt,
-            )
-            session.add(user)
-            session.commit()
-            session.refresh(user)
-            assert user.id is not None
-            household_id = 1
-            role = "owner"
-            session.add(
-                HouseholdMember(household_id=household_id, user_id=user.id, role=role)
-            )
-            session.commit()
+            owner_member = session.exec(
+                select(HouseholdMember).where(HouseholdMember.role == "owner")
+            ).first()
+            if owner_member is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Owner already bootstrapped",
+                )
+            try:
+                user = AppUser(
+                    email=email,
+                    name=req.name,
+                    created_at=now_dt,
+                )
+                session.add(user)
+                session.commit()
+                session.refresh(user)
+                assert user.id is not None
+                household_id = 1
+                role = "owner"
+                session.add(
+                    HouseholdMember(household_id=household_id, user_id=user.id, role=role)
+                )
+                session.commit()
+            except IntegrityError as exc:
+                session.rollback()
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Owner already bootstrapped",
+                ) from exc
         elif req.invite_code:
             inv_hash = hash_invite_code(req.invite_code)
             invite = session.exec(
@@ -223,9 +268,24 @@ def verify(
             session.add(
                 HouseholdMember(household_id=household_id, user_id=user.id, role=role)
             )
-            invite.used_by = user.id
-            invite.used_at = now_dt
-            session.add(invite)
+
+            # Atomic invite claim
+            claim_stmt = (
+                sa.update(Invite)
+                .where(
+                    col(Invite.id) == invite.id,
+                    col(Invite.used_at).is_(None),
+                    col(Invite.expires_at) > now_dt,
+                )
+                .values(used_at=now_dt, used_by=user.id)
+            )
+            res = session.exec(claim_stmt)
+            if res.rowcount != 1:
+                session.rollback()
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid or expired invite",
+                )
             session.commit()
         else:
             raise HTTPException(
@@ -249,16 +309,39 @@ def verify(
             invite = session.exec(
                 select(Invite).where(Invite.code_hash == inv_hash, col(Invite.used_at).is_(None))
             ).first()
-            if invite:
-                household_id = invite.household_id
-                role = "member"
-                session.add(
-                    HouseholdMember(household_id=household_id, user_id=user.id, role=role)
+            if not invite:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid or expired invite",
                 )
-                invite.used_by = user.id
-                invite.used_at = now_dt
-                session.add(invite)
-                session.commit()
+            inv_exp = invite.expires_at if invite.expires_at.tzinfo else invite.expires_at.replace(tzinfo=UTC)
+            if inv_exp <= now_dt:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid or expired invite",
+                )
+            household_id = invite.household_id
+            role = "member"
+            session.add(
+                HouseholdMember(household_id=household_id, user_id=user.id, role=role)
+            )
+            claim_stmt = (
+                sa.update(Invite)
+                .where(
+                    col(Invite.id) == invite.id,
+                    col(Invite.used_at).is_(None),
+                    col(Invite.expires_at) > now_dt,
+                )
+                .values(used_at=now_dt, used_by=user.id)
+            )
+            res = session.exec(claim_stmt)
+            if res.rowcount != 1:
+                session.rollback()
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid or expired invite",
+                )
+            session.commit()
 
     # Create session
     token = generate_session_token()
@@ -279,10 +362,6 @@ def verify(
         household_id=household_id,
         role=role,
     )
-
-
-CurrentUserDep = Annotated[AppUser, Depends(current_user)]
-CsrfDep = Annotated[None, Depends(verify_csrf)]
 
 
 @router.post("/auth/logout")

@@ -38,6 +38,13 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["user_id"], ["app_user.id"]),
         sa.PrimaryKeyConstraint("household_id", "user_id"),
     )
+    op.create_index(
+        "ix_household_member_unique_owner",
+        "household_member",
+        ["household_id"],
+        unique=True,
+        sqlite_where=sa.text("role = 'owner'"),
+    )
 
     op.create_table(
         "login_code",
@@ -96,6 +103,7 @@ def downgrade() -> None:
     op.drop_index("ix_login_code_email", table_name="login_code")
     op.drop_table("login_code")
 
+    op.drop_index("ix_household_member_unique_owner", table_name="household_member")
     op.drop_table("household_member")
 
     op.drop_index("ix_app_user_email", table_name="app_user")

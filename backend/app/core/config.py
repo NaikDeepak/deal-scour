@@ -1,6 +1,7 @@
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 @dataclass(frozen=True)
@@ -31,15 +32,25 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> "Settings":
-        dev_login = os.environ.get("DEALSCOUR_DEV_LOGIN") == "1"
         secret_key = os.environ.get("DEALSCOUR_SECRET_KEY", "")
-        if not secret_key and not dev_login:
-            raise RuntimeError("DEALSCOUR_SECRET_KEY is required in non-dev mode")
-        if not secret_key and dev_login:
-            secret_key = "dev-insecure-secret-key"
+        if not secret_key:
+            raise RuntimeError("DEALSCOUR_SECRET_KEY is required in all modes")
+        if len(secret_key) < 32:
+            raise RuntimeError("DEALSCOUR_SECRET_KEY must be at least 32 characters")
+
+        dev_login = os.environ.get("DEALSCOUR_DEV_LOGIN") == "1"
+        base_url = os.environ.get("DEALSCOUR_BASE_URL", "http://localhost:8000")
+
+        if dev_login:
+            parsed = urlparse(base_url)
+            host = (parsed.hostname or "").lower()
+            if host not in ("localhost", "127.0.0.1", "::1"):
+                raise RuntimeError(
+                    "DEALSCOUR_DEV_LOGIN is only allowed when DEALSCOUR_BASE_URL host is "
+                    f"localhost or 127.0.0.1, got: {host}"
+                )
 
         owner_email = os.environ.get("DEALSCOUR_OWNER_EMAIL", "").strip().lower()
-        base_url = os.environ.get("DEALSCOUR_BASE_URL", "")
         smtp_host = os.environ.get("SMTP_HOST", "")
         smtp_port_raw = os.environ.get("SMTP_PORT", "587")
         try:

@@ -6,6 +6,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.api.v1.auth import router as auth_router
@@ -14,6 +15,7 @@ from app.api.v1.lists import router as lists_router
 from app.api.v1.offers import router as offers_router
 from app.api.v1.prices import router as prices_router
 from app.core import clock
+from app.core.config import Settings
 from app.core.db import get_session
 from app.domain.models import AppUser, AuthSession, Household, HouseholdMember
 from app.notify.email import EmailSender, get_email_sender
@@ -69,6 +71,7 @@ def auth_app(
 @pytest.fixture
 def auth_client(auth_app: FastAPI) -> Generator[TestClient, None, None]:
     with TestClient(auth_app) as client:
+        client.headers["X-DealScour"] = "1"
         yield client
 
 
@@ -214,7 +217,11 @@ def test_7_protected_routes_and_csrf(
     assert r_auth.status_code == 200
 
     # POST without X-DealScour -> 403
-    r_post_no_csrf = auth_client.post("/api/v1/lists", json={"name": "Weekly", "kind": "quick"})
+    r_post_no_csrf = auth_client.post(
+        "/api/v1/lists",
+        json={"name": "Weekly", "kind": "quick"},
+        headers={"X-DealScour": "0"},
+    )
     assert r_post_no_csrf.status_code == 403
 
     # POST with X-DealScour: 1 -> 201
@@ -346,3 +353,141 @@ def test_10_no_secrets_in_responses_or_logs(
     for record in caplog.records:
         assert code not in record.message
         assert cookie_token not in record.message
+
+
+def test_13_brute_force_budget_across_24h(
+    auth_client: TestClient,
+    capturing_sender: CapturingEmailSender,
+    test_clock: dict[str, datetime],
+) -> None:
+    # 13. Count failed attempts across all codes for the email in last 24h.
+    # At >= 10, verify returns 400 and request-code silently sends nothing.
+    auth_client.post("/api/v1/auth/request-code", json={"email": "owner@dealscour.local"})
+    assert len(capturing_sender.sent) == 1
+
+    # 5 wrong attempts on first code
+    for _ in range(5):
+        r = auth_client.post(
+            "/api/v1/auth/verify",
+            json={"email": "owner@dealscour.local", "code": "000000"},
+        )
+        assert r.status_code == 400
+
+    # Advance 15 min and request second code
+    test_clock["now"] += timedelta(minutes=15)
+    auth_client.post("/api/v1/auth/request-code", json={"email": "owner@dealscour.local"})
+    assert len(capturing_sender.sent) == 2
+
+    # 5 wrong attempts on second code -> total 10 failed attempts within 24h
+    for _ in range(5):
+        r = auth_client.post(
+            "/api/v1/auth/verify",
+            json={"email": "owner@dealscour.local", "code": "000000"},
+        )
+        assert r.status_code == 400
+
+    # Now budget is exhausted (10 failed attempts)
+    # verify returns 400 immediately
+    r_locked = auth_client.post(
+        "/api/v1/auth/verify",
+        json={"email": "owner@dealscour.local", "code": "123456"},
+    )
+    assert r_locked.status_code == 400
+
+    # request-code returns 202 but silently sends nothing
+    capturing_sender.sent.clear()
+    r_silent = auth_client.post(
+        "/api/v1/auth/request-code",
+        json={"email": "owner@dealscour.local"},
+    )
+    assert r_silent.status_code == 202
+    assert len(capturing_sender.sent) == 0
+
+
+def test_14_owner_race_and_unique_constraint(
+    auth_client: TestClient,
+    capturing_sender: CapturingEmailSender,
+    engine: Engine,
+) -> None:
+    # 14. Owner race: bootstrap only if no owner exists yet
+    auth_client.post("/api/v1/auth/request-code", json={"email": "owner@dealscour.local"})
+    code = capturing_sender.sent[-1][1]
+    r_ver = auth_client.post(
+        "/api/v1/auth/verify",
+        json={"email": "owner@dealscour.local", "code": code},
+    )
+    assert r_ver.status_code == 200
+
+    # Second owner bootstrap attempt fails with 409
+    # Verify partial unique index enforces single owner per household at DB level
+    with pytest.raises(IntegrityError), Session(engine) as s:
+        user2 = AppUser(email="owner2@dealscour.local", name="Owner 2")
+        s.add(user2)
+        s.commit()
+        s.refresh(user2)
+        assert user2.id is not None
+        mem2 = HouseholdMember(household_id=1, user_id=user2.id, role="owner")
+        s.add(mem2)
+        s.commit()
+
+
+def test_16_csrf_required_on_all_mutating_endpoints(
+    auth_app: FastAPI,
+) -> None:
+    # 16. CSRF required on request-code and verify as well
+    with TestClient(auth_app) as client_no_csrf:
+        # Request-code without header -> 403
+        r_req = client_no_csrf.post(
+            "/api/v1/auth/request-code",
+            json={"email": "owner@dealscour.local"},
+        )
+        assert r_req.status_code == 403
+
+        # Verify without header -> 403
+        r_ver = client_no_csrf.post(
+            "/api/v1/auth/verify",
+            json={"email": "owner@dealscour.local", "code": "123456"},
+        )
+        assert r_ver.status_code == 403
+
+
+def test_17_timing_and_background_tasks(
+    auth_client: TestClient,
+    capturing_sender: CapturingEmailSender,
+) -> None:
+    # 17. Constant-work HMAC & BackgroundTasks sends email
+    r = auth_client.post(
+        "/api/v1/auth/request-code",
+        json={"email": "owner@dealscour.local"},
+    )
+    assert r.status_code == 202
+    assert len(capturing_sender.sent) == 1
+
+
+def test_18_settings_validation(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 18. Secret key validation and dev_login restricted to localhost
+    # Missing secret key
+    monkeypatch.delenv("DEALSCOUR_SECRET_KEY", raising=False)
+    with pytest.raises(RuntimeError, match="DEALSCOUR_SECRET_KEY is required"):
+        Settings.from_env()
+
+    # Secret key too short (< 32 chars)
+    monkeypatch.setenv("DEALSCOUR_SECRET_KEY", "short-secret-key-only")
+    with pytest.raises(RuntimeError, match="at least 32 characters"):
+        Settings.from_env()
+
+    # Valid secret key
+    monkeypatch.setenv("DEALSCOUR_SECRET_KEY", "a" * 32)
+    s = Settings.from_env()
+    assert s.secret_key == "a" * 32
+
+    # dev_login on public host -> error
+    monkeypatch.setenv("DEALSCOUR_DEV_LOGIN", "1")
+    monkeypatch.setenv("DEALSCOUR_BASE_URL", "https://app.dealscour.in")
+    with pytest.raises(RuntimeError, match="only allowed when DEALSCOUR_BASE_URL host is localhost"):
+        Settings.from_env()
+
+    # dev_login on localhost -> allowed
+    monkeypatch.setenv("DEALSCOUR_BASE_URL", "http://localhost:8000")
+    s_dev = Settings.from_env()
+    assert s_dev.dev_login is True

@@ -71,13 +71,12 @@ def clear_session_cookie(response: Response, secure: bool) -> None:
 
 
 def verify_csrf(request: Request) -> None:
-    """Enforce X-DealScour: 1 header on mutating requests, except request-code and verify."""
-    if request.method in ("POST", "PATCH", "DELETE", "PUT"):
-        path = request.url.path.rstrip("/")
-        if path in ("/api/v1/auth/request-code", "/api/v1/auth/verify"):
-            return
-        if request.headers.get("X-DealScour") != "1":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="CSRF check failed: missing or invalid X-DealScour header",
-            )
+    """Enforce X-DealScour: 1 header on all mutating requests under /api/v1."""
+    if (
+        request.method in ("POST", "PATCH", "DELETE", "PUT")
+        and request.headers.get("X-DealScour") != "1"
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="CSRF check failed: missing or invalid X-DealScour header",
+        )

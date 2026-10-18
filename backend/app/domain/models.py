@@ -176,6 +176,14 @@ class AppUser(SQLModel, table=True):
 
 class HouseholdMember(SQLModel, table=True):
     __tablename__ = "household_member"
+    __table_args__ = (
+        Index(
+            "ix_household_member_unique_owner",
+            "household_id",
+            unique=True,
+            sqlite_where=text("role = 'owner'"),
+        ),
+    )
 
     household_id: int = Field(foreign_key="household.id", primary_key=True)
     user_id: int = Field(foreign_key="app_user.id", primary_key=True)
