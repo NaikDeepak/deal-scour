@@ -2,7 +2,7 @@ import dataclasses
 import importlib.resources
 import json
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from sqlmodel import Session, col, select
@@ -12,6 +12,16 @@ from app.domain.models import PriceObservation
 from app.pricing.fee_schedules import Platform
 from app.pricing.landed import ItemPrice
 from app.pricing.units import Pack, Unit, default_basis, parse_pack
+
+
+def to_utc(dt: datetime) -> datetime:
+    """Normalize dt to UTC.
+
+    If naive, assume UTC. If timezone-aware, convert to UTC without dropping offset.
+    """
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
 
 
 @dataclass(frozen=True)
@@ -63,14 +73,10 @@ def compute_freshness(
 ) -> Literal["sample", "fresh", "ok", "stale"]:
     if observed_at is None:
         return "sample"
-    if observed_at.tzinfo is None and now.tzinfo is not None:
-        obs_dt = observed_at.replace(tzinfo=now.tzinfo)
-    elif observed_at.tzinfo is not None and now.tzinfo is None:
-        obs_dt = observed_at.replace(tzinfo=None)
-    else:
-        obs_dt = observed_at
+    obs_dt = to_utc(observed_at)
+    now_dt = to_utc(now)
 
-    age = now - obs_dt
+    age = now_dt - obs_dt
     is_quick = platform in {"blinkit", "instamart", "zepto"}
     fresh_limit = timedelta(hours=2) if is_quick else timedelta(hours=6)
     ok_limit = timedelta(hours=12) if is_quick else timedelta(hours=48)
@@ -89,17 +95,21 @@ def current_listings(
     now: datetime,
 ) -> list[CurrentListing]:
     seed = load_seed()
-    try:
-        observations = session.exec(
-            select(PriceObservation)
-            .where(PriceObservation.household_id == household_id)
-            .order_by(col(PriceObservation.observed_at).asc(), col(PriceObservation.id).asc())
-        ).all()
-    except Exception:
-        observations = []
+    observations = session.exec(
+        select(PriceObservation)
+        .where(PriceObservation.household_id == household_id)
+        .order_by(col(PriceObservation.observed_at).asc(), col(PriceObservation.id).asc())
+    ).all()
     latest_by_listing: dict[str, PriceObservation] = {}
     for o in observations:
-        latest_by_listing[o.listing_id] = o
+        prev = latest_by_listing.get(o.listing_id)
+        if prev is None:
+            latest_by_listing[o.listing_id] = o
+        else:
+            prev_key = (to_utc(prev.observed_at), prev.id if prev.id is not None else 0)
+            curr_key = (to_utc(o.observed_at), o.id if o.id is not None else 0)
+            if curr_key >= prev_key:
+                latest_by_listing[o.listing_id] = o
 
     result: list[CurrentListing] = []
     for item in seed:

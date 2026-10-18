@@ -928,14 +928,20 @@ def test_case_10_response_lines_contract() -> None:
                     assert line["packs"] == 1
 
 
-def test_flexible_quantity_too_large_is_422_not_500() -> None:
+def test_flexible_quantity_too_large_is_422_not_500(engine: Engine) -> None:
     from fastapi import FastAPI
 
     from app.api.v1 import plans
 
-    app = FastAPI()
-    app.include_router(plans.router, prefix="/api/v1")
-    c = TestClient(app, raise_server_exceptions=False)
+    test_app = FastAPI()
+    test_app.include_router(plans.router, prefix="/api/v1")
+
+    def override_get_session() -> Generator[Session, None, None]:
+        with Session(engine) as s:
+            yield s
+
+    test_app.dependency_overrides[get_session] = override_get_session
+    c = TestClient(test_app, raise_server_exceptions=False)
     huge = "1" + "0" * 309 + "L"
     for quantity in (huge, "101L", "100001g"):
         body = {"needs": [{"line_id": "oil", "family_key": "sunflower_oil", "quantity": quantity}]}

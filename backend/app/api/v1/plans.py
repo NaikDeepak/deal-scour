@@ -377,17 +377,18 @@ def run_plan(
         opt_fillers: list[Filler] = []
         filler_ids: set[str] = set()
         for f in req.fillers:
+            if f.listing_id not in current_by_id:
+                raise ValueError(f"Unknown filler listing_id: {f.listing_id}")
+            curr = current_by_id[f.listing_id]
+            if not curr.in_stock:
+                continue
+
             if f.filler_id in filler_ids:
                 raise ValueError(f"Duplicate filler_id: {f.filler_id}")
             if f.filler_id in seen_line_ids:
                 raise ValueError(f"filler_id '{f.filler_id}' conflicts with need line_id")
             filler_ids.add(f.filler_id)
 
-            if f.listing_id not in current_by_id:
-                raise ValueError(f"Unknown filler listing_id: {f.listing_id}")
-            curr = current_by_id[f.listing_id]
-            if not curr.in_stock:
-                continue
             listing = curr.listing
             up = unit_price(listing.item_price(), memberships[listing.platform])
             opt_fillers.append(

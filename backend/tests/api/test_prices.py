@@ -545,3 +545,71 @@ def test_case_10_migration_0003_upgrade_and_downgrade(tmp_path: Path) -> None:
     inspector3 = sa.inspect(engine3)
     assert "price_observation" not in inspector3.get_table_names()
     engine3.dispose()
+
+
+def test_case_11_out_of_stock_fillers_silently_skipped(prices_client: TestClient) -> None:
+    # (11) out-of-stock listings must be excluded as FILLERS too
+    # (request fillers and saved-list plan fillers) -> silently skipped.
+    # 1. Mark stp-4 (Amazon Fortune oil) as out of stock
+    obs_resp = prices_client.post(
+        "/api/v1/prices",
+        json={
+            "listing_id": "stp-4",
+            "listed_paise": 64900,
+            "mrp_paise": 89000,
+            "member_price_paise": 62900,
+            "in_stock": False,
+        },
+    )
+    assert obs_resp.status_code == 201
+
+    # 2. Test request fillers in POST /api/v1/plans
+    # We provide stp-4 as a filler. Because it is out of stock, it must be silently skipped without error.
+    plans_resp = prices_client.post(
+        "/api/v1/plans",
+        json={
+            "needs": [{"line_id": "atta", "product_key": "aashirvaad_select_atta_5kg", "qty": 1}],
+            "fillers": [{"filler_id": "f_oil", "listing_id": "stp-4", "score": 100}],
+            "members": ["amazon", "instamart"],
+        },
+    )
+    assert plans_resp.status_code == 200, plans_resp.text
+    plans_data = plans_resp.json()
+    for p in plans_data["plans"]:
+        for order in p["orders"]:
+            for line in order["lines"]:
+                assert line["listing_id"] != "stp-4"
+                assert line["line_id"] != "f_oil"
+
+    # 3. Test saved-list plan fillers in POST /api/v1/lists/{id}/plan
+    l_resp = prices_client.post(
+        "/api/v1/lists",
+        json={"name": "Weekly Staples", "kind": "quick"},
+    )
+    assert l_resp.status_code == 201
+    list_id = l_resp.json()["id"]
+
+    n_resp = prices_client.post(
+        f"/api/v1/lists/{list_id}/needs",
+        json={
+            "line_id": "atta",
+            "product_key": "aashirvaad_select_atta_5kg",
+            "qty": 1,
+        },
+    )
+    assert n_resp.status_code == 201
+
+    p_resp = prices_client.post(
+        f"/api/v1/lists/{list_id}/plan",
+        json={
+            "members": ["amazon", "instamart"],
+            "fillers": [{"filler_id": "f_oil", "listing_id": "stp-4", "score": 100}],
+        },
+    )
+    assert p_resp.status_code == 200, p_resp.text
+    p_data = p_resp.json()
+    for p in p_data["plans"]:
+        for order in p["orders"]:
+            for line in order["lines"]:
+                assert line["listing_id"] != "stp-4"
+                assert line["line_id"] != "f_oil"
