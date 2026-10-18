@@ -51,9 +51,13 @@ jobs:
         run: docker build -t dealscour:ci .
       - name: Boot and smoke-test
         run: |
-          docker run -d --name ds -p 8000:8000 dealscour:ci
+          docker run -d --name ds -p 8000:8000 \
+            -e DEALSCOUR_SECRET_KEY=ci-only-secret-key-that-is-long-enough-123 \
+            -e DEALSCOUR_OWNER_EMAIL=owner@example.com dealscour:ci
           for i in $(seq 1 30); do curl -fsS localhost:8000/api/v1/health && break; sleep 1; done
           curl -fsS localhost:8000/ | grep -qi "<html"
-          curl -fsS -X POST localhost:8000/api/v1/lists -H 'content-type: application/json' -d '{"name":"CI","kind":"quick"}'
-          curl -fsS localhost:8000/api/v1/lists | grep -q '"CI"'
+          # data routes are closed without a session; sign-in endpoint answers uniformly
+          test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8000/api/v1/lists)" = "401"
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST localhost:8000/api/v1/auth/request-code \
+            -H 'content-type: application/json' -H 'X-DealScour: 1' -d '{"email":"nobody@example.com"}')" = "202"
           docker logs ds | tail -20

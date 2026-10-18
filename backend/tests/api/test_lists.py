@@ -187,6 +187,8 @@ def test_persistence_across_app_instances(tmp_path: Path) -> None:
     command.upgrade(alembic_cfg, "head")
 
     engine_a = create_db_engine(db_file)
+    from tests.conftest import _seed_auth_user_and_session
+    _seed_auth_user_and_session(engine_a)
     app_a = FastAPI()
     app_a.include_router(lists_router, prefix="/api/v1")
 

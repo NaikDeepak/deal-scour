@@ -1,20 +1,21 @@
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import IntegrityError
 
-from app.api.v1 import baskets, deals, lists, offers, plans, prices
+from app.api.v1 import auth, baskets, deals, households, lists, offers, plans, prices
 from app.core.config import get_settings
+from app.core.security import verify_csrf
 
 app = FastAPI(title="DealScour", version="0.1.0")
-app.include_router(deals.router, prefix="/api/v1")
-app.include_router(plans.router, prefix="/api/v1")
-app.include_router(lists.router, prefix="/api/v1")
-app.include_router(offers.router, prefix="/api/v1")
-app.include_router(baskets.router, prefix="/api/v1")
-app.include_router(prices.router, prefix="/api/v1")
+# Every router gets the CSRF check (X-DealScour: 1 on POST/PATCH/PUT/DELETE). Data routers also need a session
+# through current_household_id; tests/test_auth_coverage.py walks every route to prove nothing is left open.
+_csrf = [Depends(verify_csrf)]
+for _router in (auth.router, households.router, deals.router, plans.router, lists.router, offers.router,
+                baskets.router, prices.router):
+    app.include_router(_router, prefix="/api/v1", dependencies=_csrf)
 
 
 @app.exception_handler(IntegrityError)

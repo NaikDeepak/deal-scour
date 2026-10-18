@@ -162,3 +162,72 @@ class PriceObservation(SQLModel, table=True):
         default_factory=lambda: datetime.now(UTC)
     )
 
+
+class AppUser(SQLModel, table=True):
+    __tablename__ = "app_user"
+
+    id: int | None = Field(default=None, primary_key=True)
+    email: str = Field(unique=True, index=True)
+    name: str | None = Field(default=None)
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC)
+    )
+
+
+class HouseholdMember(SQLModel, table=True):
+    __tablename__ = "household_member"
+    __table_args__ = (
+        Index(
+            "ix_household_member_unique_owner",
+            "household_id",
+            unique=True,
+            sqlite_where=text("role = 'owner'"),
+        ),
+    )
+
+    household_id: int = Field(foreign_key="household.id", primary_key=True)
+    user_id: int = Field(foreign_key="app_user.id", primary_key=True)
+    role: str = Field(...)  # "owner" | "member"
+
+
+class LoginCode(SQLModel, table=True):
+    __tablename__ = "login_code"
+
+    id: int | None = Field(default=None, primary_key=True)
+    email: str = Field(index=True)
+    code_hash: str
+    expires_at: datetime
+    attempts: int = Field(default=0)
+    used_at: datetime | None = Field(default=None)
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC)
+    )
+
+
+class AuthSession(SQLModel, table=True):
+    __tablename__ = "auth_session"
+
+    id: int | None = Field(default=None, primary_key=True)
+    token_hash: str = Field(unique=True, index=True)
+    user_id: int = Field(foreign_key="app_user.id", index=True)
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC)
+    )
+    expires_at: datetime
+    last_seen_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC)
+    )
+
+
+class Invite(SQLModel, table=True):
+    __tablename__ = "invite"
+
+    id: int | None = Field(default=None, primary_key=True)
+    code_hash: str = Field(unique=True, index=True)
+    household_id: int = Field(foreign_key="household.id", index=True)
+    created_by: int = Field(foreign_key="app_user.id")
+    expires_at: datetime
+    used_by: int | None = Field(default=None, foreign_key="app_user.id")
+    used_at: datetime | None = Field(default=None)
+
+
