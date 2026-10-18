@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from pathlib import Path
 
 import sqlalchemy as sa
@@ -24,7 +25,15 @@ def test_migrations_create_expected_schema_and_household(tmp_path: Path) -> None
     table_names = set(inspector.get_table_names())
     # Exclude alembic_version
     user_tables = table_names - {"alembic_version"}
-    expected_tables = {"household", "shopping_list", "need", "offer"}
+    expected_tables = {
+        "household",
+        "shopping_list",
+        "need",
+        "offer",
+        "plan_run",
+        "basket",
+        "basket_line",
+    }
     assert user_tables == expected_tables
 
     # Compare columns between SQLModel.metadata and database schema
@@ -41,6 +50,47 @@ def test_migrations_create_expected_schema_and_household(tmp_path: Path) -> None
         assert row is not None
         assert row.name == "Home"
         assert row.pincode == "411018"
+
+
+def test_migration_0002_upgrade_preserves_data(tmp_path: Path) -> None:
+    db_file = tmp_path / "upgrade_test.db"
+    db_url = f"sqlite:///{db_file.resolve()}"
+
+    alembic_cfg = Config(str(Path(__file__).parent.parent / "alembic.ini"))
+    alembic_cfg.set_main_option("sqlalchemy.url", db_url)
+    alembic_cfg.set_main_option("script_location", str(Path(__file__).parent.parent / "migrations"))
+
+    # 1. Upgrade to 0001_initial
+    command.upgrade(alembic_cfg, "0001_initial")
+
+    engine = create_db_engine(db_file)
+    with Session(engine) as session:
+        shopping_list_table = SQLModel.metadata.tables["shopping_list"]
+        session.exec(
+            sa.insert(shopping_list_table).values(
+                id=1,
+                household_id=1,
+                name="Test List Pre-Upgrade",
+                kind="monthly",
+                archived=False,
+                created_at=datetime.now(UTC),
+            )
+        )
+        session.commit()
+    engine.dispose()
+
+    # 2. Upgrade to head (0002_baskets)
+    command.upgrade(alembic_cfg, "head")
+
+    # 3. Verify list still exists without data loss
+    engine2 = create_db_engine(db_file)
+    with Session(engine2) as session:
+        shopping_list_table = SQLModel.metadata.tables["shopping_list"]
+        row = session.exec(sa.select(shopping_list_table).where(shopping_list_table.c.id == 1)).first()
+        assert row is not None
+        assert row.name == "Test List Pre-Upgrade"
+        assert row.kind == "monthly"
+    engine2.dispose()
 
 
 def test_sqlite_pragmas(tmp_path: Path) -> None:

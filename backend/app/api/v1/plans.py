@@ -223,8 +223,7 @@ def _build_plan_out(
     )
 
 
-@router.post("/plans", response_model=PlansResponse)
-def post_plans(req: PlansRequest) -> PlansResponse:
+def run_plan(req: PlansRequest) -> PlansResponse:
     # 1. Validate members
     members_set: set[Platform] = set()
     for m in req.members:
@@ -446,3 +445,9 @@ def post_plans(req: PlansRequest) -> PlansResponse:
         )
 
     return PlansResponse(baseline=baseline_out, plans=plans_out)
+
+
+@router.post("/plans", response_model=PlansResponse)
+def post_plans(req: PlansRequest) -> PlansResponse:
+    return run_plan(req)
+
