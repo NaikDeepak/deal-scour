@@ -1,5 +1,6 @@
 from typing import Any
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -464,3 +465,140 @@ def test_8_money_fields_are_all_int() -> None:
                 assert_no_floats(v, f"{path}[{i}]")
 
     assert_no_floats(data)
+
+
+def test_9_tiers_validation() -> None:
+    # tiers must be exactly [min, value] pairs at request validation:
+    # [[1]] and [[1, 2, 3]] -> 422
+    r1 = client.post(
+        "/api/v1/plans",
+        json={
+            "needs": [{"line_id": "atta", "product_key": "aashirvaad_atta", "qty": 1}],
+            "offers": [
+                {
+                    "id": "O1",
+                    "platform": "amazon",
+                    "kind": "tiered",
+                    "tiers": [[1]],
+                }
+            ],
+        },
+    )
+    assert r1.status_code == 422
+
+    r2 = client.post(
+        "/api/v1/plans",
+        json={
+            "needs": [{"line_id": "atta", "product_key": "aashirvaad_atta", "qty": 1}],
+            "offers": [
+                {
+                    "id": "O1",
+                    "platform": "amazon",
+                    "kind": "tiered",
+                    "tiers": [[1, 2, 3]],
+                }
+            ],
+        },
+    )
+    assert r2.status_code == 422
+
+
+def test_10_duplicate_offer_ids_and_optimizer_value_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 1. Duplicate offer ids rejected at request validation -> 422
+    r1 = client.post(
+        "/api/v1/plans",
+        json={
+            "needs": [{"line_id": "atta", "product_key": "aashirvaad_atta", "qty": 1}],
+            "offers": [
+                {
+                    "id": "A1",
+                    "platform": "amazon",
+                    "kind": "flat",
+                    "min_order_paise": 50000,
+                    "value_paise": 5000,
+                },
+                {
+                    "id": "A1",
+                    "platform": "amazon",
+                    "kind": "flat",
+                    "min_order_paise": 50000,
+                    "value_paise": 5000,
+                },
+            ],
+        },
+    )
+    assert r1.status_code == 422
+
+    # 2. Any ValueError from optimizer plan(...) wrapped -> 422
+    import app.api.v1.plans as plans_module
+
+    def mock_plan(*args: Any, **kwargs: Any) -> Any:
+        raise ValueError("simulated optimizer failure")
+
+    monkeypatch.setattr(plans_module, "plan", mock_plan)
+    r2 = client.post(
+        "/api/v1/plans",
+        json={"needs": [{"line_id": "atta", "product_key": "aashirvaad_atta", "qty": 1}]},
+    )
+    assert r2.status_code == 422
+    assert "simulated optimizer failure" in r2.json()["detail"]
+
+
+def test_11_duplicate_and_conflicting_filler_id() -> None:
+    # Duplicate filler_id -> 422
+    r1 = client.post(
+        "/api/v1/plans",
+        json={
+            "needs": [{"line_id": "atta", "product_key": "aashirvaad_atta", "qty": 1}],
+            "fillers": [
+                {"filler_id": "f1", "listing_id": "stp-1", "score": 1},
+                {"filler_id": "f1", "listing_id": "stp-2", "score": 2},
+            ],
+        },
+    )
+    assert r1.status_code == 422
+
+    # filler_id equal to any need line_id -> 422
+    r2 = client.post(
+        "/api/v1/plans",
+        json={
+            "needs": [{"line_id": "atta", "product_key": "aashirvaad_atta", "qty": 1}],
+            "fillers": [
+                {"filler_id": "atta", "listing_id": "stp-1", "score": 1},
+            ],
+        },
+    )
+    assert r2.status_code == 422
+
+
+def test_12_qty_range_validation() -> None:
+    # qty must be 1..99 -> 422 outside that range
+    r_zero = client.post(
+        "/api/v1/plans",
+        json={"needs": [{"line_id": "atta", "product_key": "aashirvaad_atta", "qty": 0}]},
+    )
+    assert r_zero.status_code == 422
+
+    r_negative = client.post(
+        "/api/v1/plans",
+        json={"needs": [{"line_id": "atta", "product_key": "aashirvaad_atta", "qty": -1}]},
+    )
+    assert r_negative.status_code == 422
+
+    r_100 = client.post(
+        "/api/v1/plans",
+        json={"needs": [{"line_id": "atta", "product_key": "aashirvaad_atta", "qty": 100}]},
+    )
+    assert r_100.status_code == 422
+
+    r_1 = client.post(
+        "/api/v1/plans",
+        json={"needs": [{"line_id": "atta", "product_key": "aashirvaad_atta", "qty": 1}]},
+    )
+    assert r_1.status_code == 200
+
+    r_99 = client.post(
+        "/api/v1/plans",
+        json={"needs": [{"line_id": "atta", "product_key": "aashirvaad_atta", "qty": 99}]},
+    )
+    assert r_99.status_code == 200

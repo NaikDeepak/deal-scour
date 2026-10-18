@@ -29,7 +29,7 @@ _DEFAULT_MEMBERS: list[Platform] = ["amazon", "instamart", "flipkart"]
 class NeedIn(BaseModel):
     line_id: str
     product_key: str
-    qty: int = Field(default=1, ge=1)
+    qty: int = Field(default=1, ge=1, le=99)
     need_by_minutes: int | None = None
     lock_platform: Platform | None = None
 
@@ -42,7 +42,7 @@ class OfferIn(BaseModel):
     value_paise: Paise = 0
     rate_bp: int = 0
     cap_paise: Paise | None = None
-    tiers: list[list[Paise]] = Field(default_factory=list)
+    tiers: list[tuple[Paise, Paise]] = Field(default_factory=list)
     uses_left: int = 1
     stack_group: str = "platform_coupon"
     value_type: ValueType = "cash"
@@ -231,6 +231,9 @@ def post_plans(req: PlansRequest) -> PlansResponse:
 
     try:
         for need in req.needs:
+            if need.qty < 1 or need.qty > 99:
+                raise ValueError(f"qty must be 1..99, got {need.qty}")
+
             if need.line_id in seen_line_ids:
                 raise ValueError(f"Duplicate line_id: {need.line_id}")
             seen_line_ids.add(need.line_id)
@@ -262,10 +265,13 @@ def post_plans(req: PlansRequest) -> PlansResponse:
 
         # 3. Build offers
         opt_offers: list[Offer] = []
+        seen_offer_ids: set[str] = set()
         for off in req.offers:
-            tiers_tuple: tuple[tuple[Paise, Paise], ...] = tuple(
-                (t[0], t[1]) for t in off.tiers
-            )
+            if off.id in seen_offer_ids:
+                raise ValueError(f"Duplicate offer id: {off.id}")
+            seen_offer_ids.add(off.id)
+
+            tiers_tuple: tuple[tuple[Paise, Paise], ...] = tuple(off.tiers)
             cats = frozenset(off.eligible_categories) if off.eligible_categories is not None else None
             opt_offers.append(
                 Offer(
@@ -289,6 +295,12 @@ def post_plans(req: PlansRequest) -> PlansResponse:
         opt_fillers: list[Filler] = []
         filler_ids: set[str] = set()
         for f in req.fillers:
+            if f.filler_id in filler_ids:
+                raise ValueError(f"Duplicate filler_id: {f.filler_id}")
+            if f.filler_id in seen_line_ids:
+                raise ValueError(f"filler_id '{f.filler_id}' conflicts with need line_id")
+            filler_ids.add(f.filler_id)
+
             if f.listing_id not in seed_by_id:
                 raise ValueError(f"Unknown filler listing_id: {f.listing_id}")
             listing = seed_by_id[f.listing_id]
@@ -303,7 +315,6 @@ def post_plans(req: PlansRequest) -> PlansResponse:
                     score=f.score,
                 )
             )
-            filler_ids.add(f.filler_id)
 
         # 5. PendingSettings overrides
         pending_kwargs: dict[str, int] = {}
@@ -317,17 +328,17 @@ def post_plans(req: PlansRequest) -> PlansResponse:
             if pending_kwargs
             else DEFAULT_PENDING_SETTINGS
         )
+
+        # 6. Execute optimizer
+        planset: PlanSet = plan(
+            needs=opt_needs,
+            offers=opt_offers,
+            memberships=memberships,
+            fillers=opt_fillers,
+            pending_settings=pending_settings,
+        )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
-
-    # 6. Execute optimizer
-    planset: PlanSet = plan(
-        needs=opt_needs,
-        offers=opt_offers,
-        memberships=memberships,
-        fillers=opt_fillers,
-        pending_settings=pending_settings,
-    )
 
     # 7. Map response
     baseline_out = _build_plan_out(
