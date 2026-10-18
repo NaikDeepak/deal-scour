@@ -34,6 +34,12 @@ class PlanSettings:
     max_orders_per_platform: int = 4
     max_iterations: int = 300
 
+    def __post_init__(self) -> None:
+        if self.max_orders_per_platform < 1:
+            raise ValueError(f"max_orders_per_platform must be >= 1, got {self.max_orders_per_platform}")
+        if self.max_iterations < 0:
+            raise ValueError(f"max_iterations must be >= 0, got {self.max_iterations}")
+
 
 DEFAULT_PLAN_SETTINGS = PlanSettings()
 

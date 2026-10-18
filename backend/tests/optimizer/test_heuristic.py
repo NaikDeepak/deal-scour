@@ -538,3 +538,14 @@ def test_case_14_invariants() -> None:
             seen_line_ids.append(line.line_id)
 
     assert sorted(seen_line_ids) == sorted(n.line_id for n in needs)
+
+
+def test_plan_settings_rejects_invalid_limits() -> None:
+    import pytest
+
+    from app.optimizer.planning import PlanSettings
+
+    with pytest.raises(ValueError):
+        PlanSettings(max_orders_per_platform=0)
+    with pytest.raises(ValueError):
+        PlanSettings(max_iterations=-1)
