@@ -39,6 +39,9 @@ class Offer:
         if self.multiplier_bp is not None and not (0 <= self.multiplier_bp <= 10000):
             raise ValueError(f"multiplier_bp must be 0..10000, got {self.multiplier_bp}")
 
+        if self.kind not in ("flat", "pct_cap", "tiered"):
+            raise ValueError(f"unknown offer kind: {self.kind}")
+
         if self.kind == "flat":
             if self.value <= 0:
                 raise ValueError(f"flat offer value must be > 0, got {self.value}")
@@ -77,6 +80,8 @@ class OrderLine:
             raise ValueError(f"qty must be >= 1, got {self.qty}")
         if isinstance(self.unit_price, bool) or not isinstance(self.unit_price, int):
             raise TypeError(f"unit_price must be int paise, got {type(self.unit_price).__name__}")
+        if self.unit_price < 0:
+            raise ValueError(f"unit_price cannot be negative, got {self.unit_price}")
 
     @property
     def total(self) -> Paise:

@@ -137,6 +137,13 @@ def evaluate_plan(
     Maximizes total effective offer value respecting stacking groups and usages,
     computes order-level fees, and calculates net totals.
     """
+    # Validate offer IDs are unique
+    seen_offer_ids: set[str] = set()
+    for offer in offers:
+        if offer.id in seen_offer_ids:
+            raise ValueError(f"duplicate offer id: {offer.id}")
+        seen_offer_ids.add(offer.id)
+
     if not orders:
         return PlanResult(
             orders=(),

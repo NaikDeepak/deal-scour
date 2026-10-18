@@ -1,8 +1,9 @@
 import time
 
-from app.optimizer.evaluate import evaluate_plan
+import pytest
 
 from app.optimizer.contract import Offer, Order, OrderLine
+from app.optimizer.evaluate import evaluate_plan
 
 
 def _make_line(category: str, price: int, line_id: str = "l") -> OrderLine:
@@ -320,3 +321,13 @@ def test_case_21_performance() -> None:
             break
 
     assert passed, f"Performance test failed: elapsed {elapsed_ms:.2f} ms >= 50 ms"
+
+
+def test_case_24_duplicate_offer_id() -> None:
+    # 24. evaluate_plan with two offers sharing an id -> ValueError
+    offer1 = Offer(id="DUP", platform="amazon", kind="flat", min_order=50000, value=5000)
+    offer2 = Offer(id="DUP", platform="amazon", kind="flat", min_order=40000, value=4000)
+    order = Order(platform="amazon", lines=(_make_line("staples", 60000),), is_member=True)
+
+    with pytest.raises(ValueError):
+        evaluate_plan([order], [offer1, offer2])

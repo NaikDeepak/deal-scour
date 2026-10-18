@@ -150,3 +150,15 @@ def test_case_6_validation() -> None:
 
     with pytest.raises(ValueError):
         OrderLine(line_id="l0", category="staples", unit_price=1000, qty=0)
+
+
+def test_case_22_order_line_negative_unit_price() -> None:
+    # 22. OrderLine with unit_price < 0 -> ValueError
+    with pytest.raises(ValueError):
+        OrderLine(line_id="l1", category="staples", unit_price=-100)
+
+
+def test_case_23_offer_unknown_kind() -> None:
+    # 23. Offer with kind not in flat/pct_cap/tiered (e.g. "bogus") -> ValueError
+    with pytest.raises(ValueError):
+        Offer(id="O_bogus", platform="amazon", kind="bogus")  # type: ignore[arg-type]
