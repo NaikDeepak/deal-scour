@@ -269,3 +269,13 @@ class CustomListing(SQLModel, table=True):
     )
 
 
+class SourceStatus(SQLModel, table=True):
+    __tablename__ = "source_status"
+
+    platform: str = Field(primary_key=True)
+    consecutive_failures: int = Field(default=0)
+    disabled_until: datetime | None = Field(default=None)
+    last_success_at: datetime | None = Field(default=None)
+    last_error: str | None = Field(default=None, max_length=200)
+
+
