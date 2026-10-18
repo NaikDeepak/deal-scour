@@ -6,7 +6,7 @@
 - [x] `git init`, move prototype files → `prototype/` (ADR-018), and strip nothing.
 - [ ] Scaffold `backend/` (venv+pip, FastAPI, SQLModel, Alembic, ruff, mypy, pytest) and `web/` (Vite, React, TS, Tailwind, PWA plugin).
 - [ ] `core/money.py` (paise helpers), `pricing/units.py`, `pricing/fee_schedules.py`, `pricing/landed.py` with tests.
-- [ ] Seed script importing the 35 prototype listings as `source="sample"` (fix walnuts grouping).
+- [x] Seed file with the 28 prototype listings as `source="sample"` (walnuts get their own product) → `backend/app/seed/prototype_catalog.json`.
 - [ ] `docker-compose.yml` + Caddy, running locally.
 
 **Exit:** `GET /deals` returns correct membership-aware landed prices and unit rates, with order-level fees shown separately.
