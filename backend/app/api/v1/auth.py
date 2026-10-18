@@ -223,15 +223,14 @@ def verify(
                     created_at=now_dt,
                 )
                 session.add(user)
-                session.commit()
-                session.refresh(user)
+                session.flush()
                 assert user.id is not None
                 household_id = 1
                 role = "owner"
                 session.add(
                     HouseholdMember(household_id=household_id, user_id=user.id, role=role)
                 )
-                session.commit()
+                session.flush()
             except IntegrityError as exc:
                 session.rollback()
                 raise HTTPException(
@@ -254,22 +253,8 @@ def verify(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Invalid or expired invite",
                 )
-            user = AppUser(
-                email=email,
-                name=req.name,
-                created_at=now_dt,
-            )
-            session.add(user)
-            session.commit()
-            session.refresh(user)
-            assert user.id is not None
-            household_id = invite.household_id
-            role = "member"
-            session.add(
-                HouseholdMember(household_id=household_id, user_id=user.id, role=role)
-            )
 
-            # Atomic invite claim
+            # Atomic invite claim FIRST: claim invite before creating user so lost race leaves no orphan user
             claim_stmt = (
                 sa.update(Invite)
                 .where(
@@ -277,7 +262,7 @@ def verify(
                     col(Invite.used_at).is_(None),
                     col(Invite.expires_at) > now_dt,
                 )
-                .values(used_at=now_dt, used_by=user.id)
+                .values(used_at=now_dt)
             )
             res = session.exec(claim_stmt)
             if res.rowcount != 1:
@@ -286,7 +271,25 @@ def verify(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Invalid or expired invite",
                 )
-            session.commit()
+
+            user = AppUser(
+                email=email,
+                name=req.name,
+                created_at=now_dt,
+            )
+            session.add(user)
+            session.flush()
+            assert user.id is not None
+            session.exec(
+                sa.update(Invite)
+                .where(col(Invite.id) == invite.id)
+                .values(used_by=user.id)
+            )
+            household_id = invite.household_id
+            role = "member"
+            session.add(
+                HouseholdMember(household_id=household_id, user_id=user.id, role=role)
+            )
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -297,7 +300,6 @@ def verify(
         if req.name and not user.name:
             user.name = req.name
             session.add(user)
-            session.commit()
         member = session.exec(
             select(HouseholdMember).where(HouseholdMember.user_id == user.id)
         ).first()
@@ -320,11 +322,8 @@ def verify(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Invalid or expired invite",
                 )
-            household_id = invite.household_id
-            role = "member"
-            session.add(
-                HouseholdMember(household_id=household_id, user_id=user.id, role=role)
-            )
+
+            # Atomic invite claim FIRST
             claim_stmt = (
                 sa.update(Invite)
                 .where(
@@ -341,7 +340,11 @@ def verify(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Invalid or expired invite",
                 )
-            session.commit()
+            household_id = invite.household_id
+            role = "member"
+            session.add(
+                HouseholdMember(household_id=household_id, user_id=user.id, role=role)
+            )
 
     # Create session
     token = generate_session_token()

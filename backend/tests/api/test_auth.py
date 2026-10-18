@@ -3,6 +3,7 @@ from collections.abc import Generator
 from datetime import UTC, datetime, timedelta
 
 import pytest
+import sqlalchemy as sa
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.engine import Engine
@@ -17,7 +18,8 @@ from app.api.v1.prices import router as prices_router
 from app.core import clock
 from app.core.config import Settings
 from app.core.db import get_session
-from app.domain.models import AppUser, AuthSession, Household, HouseholdMember
+from app.core.security import hash_invite_code
+from app.domain.models import AppUser, AuthSession, Household, HouseholdMember, Invite
 from app.notify.email import EmailSender, get_email_sender
 
 
@@ -491,3 +493,156 @@ def test_18_settings_validation(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DEALSCOUR_BASE_URL", "http://localhost:8000")
     s_dev = Settings.from_env()
     assert s_dev.dev_login is True
+
+
+def test_19_racing_invites_leave_no_orphan_user(
+    auth_client: TestClient,
+    capturing_sender: CapturingEmailSender,
+    engine: Engine,
+) -> None:
+    # 19. Two verifies racing the same invite: first wins, second fails, exactly 1 new user
+    auth_client.post("/api/v1/auth/request-code", json={"email": "owner@dealscour.local"})
+    code_owner = capturing_sender.sent[-1][1]
+    auth_client.post(
+        "/api/v1/auth/verify",
+        json={"email": "owner@dealscour.local", "code": code_owner},
+    )
+
+    # Seed a valid invite for household 1
+    invite_code = "valid-invite-token-12345"
+    with Session(engine) as s:
+        invite = Invite(
+            household_id=1,
+            code_hash=hash_invite_code(invite_code),
+            created_by=1,
+            created_at=datetime.now(UTC),
+            expires_at=datetime.now(UTC) + timedelta(days=7),
+        )
+        s.add(invite)
+        s.commit()
+
+    # Two users request codes with the same valid invite
+    capturing_sender.sent.clear()
+    auth_client.post(
+        "/api/v1/auth/request-code",
+        json={"email": "alice@family.local", "invite_code": invite_code},
+    )
+    code_alice = capturing_sender.sent[-1][1]
+
+    auth_client.post(
+        "/api/v1/auth/request-code",
+        json={"email": "bob@family.local", "invite_code": invite_code},
+    )
+    code_bob = capturing_sender.sent[-1][1]
+
+    # Alice verifies first and wins
+    r_alice = auth_client.post(
+        "/api/v1/auth/verify",
+        json={
+            "email": "alice@family.local",
+            "code": code_alice,
+            "invite_code": invite_code,
+            "name": "Alice",
+        },
+    )
+    assert r_alice.status_code == 200
+    assert r_alice.json()["role"] == "member"
+
+    # Bob verifies second with the same invite and loses
+    r_bob = auth_client.post(
+        "/api/v1/auth/verify",
+        json={
+            "email": "bob@family.local",
+            "code": code_bob,
+            "invite_code": invite_code,
+            "name": "Bob",
+        },
+    )
+    assert r_bob.status_code == 400
+    assert "Invalid or expired invite" in r_bob.json()["detail"]
+
+    # Verify DB: Bob was NEVER created as an orphan user!
+    with Session(engine) as s:
+        bob_user = s.exec(select(AppUser).where(AppUser.email == "bob@family.local")).first()
+        assert bob_user is None
+
+        alice_user = s.exec(select(AppUser).where(AppUser.email == "alice@family.local")).first()
+        assert alice_user is not None
+
+        all_users = s.exec(select(AppUser)).all()
+        # Exactly 2 users: owner + Alice
+        assert len(all_users) == 2
+
+        inv_db = s.exec(
+            select(Invite).where(Invite.code_hash == hash_invite_code(invite_code))
+        ).first()
+        assert inv_db is not None
+        assert inv_db.used_by == alice_user.id
+        assert inv_db.used_at is not None
+
+
+def test_19_racing_invites_simulated_interleaved_claim_leaves_no_orphan(
+    auth_client: TestClient,
+    capturing_sender: CapturingEmailSender,
+    engine: Engine,
+) -> None:
+    # Simulate race where invite is claimed right between lookup and atomic update
+    auth_client.post("/api/v1/auth/request-code", json={"email": "owner@dealscour.local"})
+    code_owner = capturing_sender.sent[-1][1]
+    auth_client.post(
+        "/api/v1/auth/verify",
+        json={"email": "owner@dealscour.local", "code": code_owner},
+    )
+
+    invite_code = "interleaved-race-invite-54321"
+    with Session(engine) as s:
+        invite = Invite(
+            household_id=1,
+            code_hash=hash_invite_code(invite_code),
+            created_by=1,
+            created_at=datetime.now(UTC),
+            expires_at=datetime.now(UTC) + timedelta(days=7),
+        )
+        s.add(invite)
+        s.commit()
+
+    capturing_sender.sent.clear()
+    auth_client.post(
+        "/api/v1/auth/request-code",
+        json={"email": "carol@family.local", "invite_code": invite_code},
+    )
+    code_carol = capturing_sender.sent[-1][1]
+
+    # Intercept cursor execution: when UPDATE on invite runs, claim it beforehand
+    interleaved = False
+
+    @sa.event.listens_for(engine, "before_cursor_execute")
+    def intercept_claim(conn, cursor, statement, parameters, context, executemany):  # type: ignore[no-untyped-def]
+        nonlocal interleaved
+        if "UPDATE invite" in statement and not interleaved:
+            interleaved = True
+            conn.exec_driver_sql(
+                "UPDATE invite SET used_at = '2026-10-18 12:00:00' WHERE used_at IS NULL"
+            )
+
+    try:
+        r_carol = auth_client.post(
+            "/api/v1/auth/verify",
+            json={
+                "email": "carol@family.local",
+                "code": code_carol,
+                "invite_code": invite_code,
+                "name": "Carol",
+            },
+        )
+        assert r_carol.status_code == 400
+        assert "Invalid or expired invite" in r_carol.json()["detail"]
+    finally:
+        sa.event.remove(engine, "before_cursor_execute", intercept_claim)
+
+    assert interleaved is True
+    # Carol was NEVER created as an orphan user
+    with Session(engine) as s:
+        carol_user = s.exec(select(AppUser).where(AppUser.email == "carol@family.local")).first()
+        assert carol_user is None
+
