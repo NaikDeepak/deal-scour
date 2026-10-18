@@ -25,7 +25,7 @@ Home pincode: 411018 (Pimpri-Chinchwad). The design supports multiple households
 | `prototype/dealscour_v3.html` | **Prototype / reference only.** Single-file Tailwind UI with mocked data. Do not extend it. |
 | `prototype/deal_scour_backend.py` | **Prototype / reference only.** Mock catalog + wishlist scan. Do not extend it. |
 | `docs/` | Source of truth for product, architecture, flows, decisions. |
-| `backend/` | **Phase 0.** FastAPI skeleton + pricing core. Target layout in `docs/ARCHITECTURE.md` §3. |
+| `backend/` | **Phase 1.** Pricing core, `GET /api/v1/deals`, and the optimizer (`app/optimizer/`, entry point `planset.plan`). Target layout in `docs/ARCHITECTURE.md` §3. |
 | `web/` | **Phase 0.** Vite + React + TS + Tailwind v4 shell, `formatINR`, vitest. `pnpm dev` proxies `/api` to :8000. |
 | `docs/tasks/` | Task specs the lead writes for builders (agent-notepad). |
 
@@ -120,8 +120,8 @@ Prototype only: `python3 prototype/deal_scour_backend.py`, or open `prototype/de
 
 ### Add a new offer kind (e.g. "Buy 2 get 1")
 1. Add the kind to `domain/offer.py` with a typed params model and validation.
-2. Model it in `optimizer/model.py` (CP-SAT) **and** `optimizer/heuristic.py` (fallback). The two must agree on small cases.
-   Add a cross-check test.
+2. Score it in `optimizer/offers.py` (`face_value`) so `evaluate_plan` handles it, and make sure `heuristic.py` moves can reach it.
+   Extend `tests/optimizer/test_crosscheck.py` so brute force covers the new kind. (CP-SAT is deferred, ADR-023.)
 3. Add an explanation template in `optimizer/explain.py`.
 4. Add a golden test plus a row to the offer-kind table in `docs/BASKET_OPTIMIZER.md` §3.
 5. Add an entry form in `web/src/features/offers/`.

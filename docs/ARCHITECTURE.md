@@ -69,7 +69,8 @@ deal-scour/
 │   │   ├── core/              config.py, db.py, auth.py, money.py (paise helpers), clock.py
 │   │   ├── domain/            platform.py, product.py, listing.py, offer.py, need.py, basket.py, household.py
 │   │   ├── pricing/           fee_schedules.py, landed.py, units.py
-│   │   ├── optimizer/         contract.py, model.py (CP-SAT), heuristic.py, fillers.py, explain.py, baseline.py
+│   │   ├── optimizer/         contract.py, offers.py, evaluate.py (scorer), planning.py, baseline.py, heuristic.py,
+│   │   │                      pending.py (pending + fillers), explain.py (reasons), planset.py (entry point); CP-SAT deferred (ADR-023)
 │   │   ├── matching/          parser.py, matcher.py, url_parser.py, llm_parser.py (optional)
 │   │   ├── sources/           base.py, manual.py, link.py, extension.py, amazon_paapi.py, fetchers/<platform>.py
 │   │   ├── jobs/              scheduler.py, refresh_prices.py, scan_watches.py, check_pending.py, offer_expiry.py, restock_due.py
