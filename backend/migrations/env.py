@@ -5,7 +5,7 @@ from sqlalchemy import engine_from_config, event, pool
 from sqlmodel import SQLModel
 
 import app.domain.models  # noqa: F401
-from app.core.config import get_settings
+from app.core.config import db_path_from_env
 from app.core.db import _set_sqlite_pragma
 
 config = context.config
@@ -19,9 +19,10 @@ target_metadata = SQLModel.metadata
 def get_url() -> str:
     url = config.get_main_option("sqlalchemy.url")
     if not url:
-        settings = get_settings()
-        settings.ensure_db_dir()
-        url = settings.db_url
+        # Migrations only need the DB path, not the signing secret (Settings.from_env validates that).
+        db_path = db_path_from_env()
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        url = f"sqlite:///{db_path.resolve()}"
     return url
 
 

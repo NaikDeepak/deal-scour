@@ -63,7 +63,7 @@ class Settings:
 
         static = os.environ.get("DEALSCOUR_STATIC_DIR")
         return cls(
-            db_path=Path(os.environ.get("DEALSCOUR_DB_PATH", "./data/dealscour.db")),
+            db_path=db_path_from_env(),
             static_dir=Path(static) if static else None,
             secret_key=secret_key,
             owner_email=owner_email,
@@ -75,6 +75,11 @@ class Settings:
             smtp_password=smtp_password,
             smtp_from=smtp_from,
         )
+
+
+def db_path_from_env() -> Path:
+    """DB location only, no secret validation: migrations and backups never sign anything."""
+    return Path(os.environ.get("DEALSCOUR_DB_PATH", "./data/dealscour.db"))
 
 
 def get_settings() -> Settings:

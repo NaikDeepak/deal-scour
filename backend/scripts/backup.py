@@ -7,9 +7,8 @@ Cron on the host:  0 3 * * *  docker compose exec -T app python scripts/backup.p
 import argparse
 import sqlite3
 from datetime import UTC, datetime
-from pathlib import Path
 
-from app.core.config import Settings
+from app.core.config import db_path_from_env
 
 
 def main() -> None:
@@ -17,7 +16,7 @@ def main() -> None:
     parser.add_argument("--keep", type=int, default=14)
     args = parser.parse_args()
 
-    db_path = Path(Settings.from_env().db_path)
+    db_path = db_path_from_env()
     backup_dir = db_path.parent / "backups"
     backup_dir.mkdir(parents=True, exist_ok=True)
     target = backup_dir / f"dealscour-{datetime.now(UTC):%Y%m%d-%H%M%S}.db"
