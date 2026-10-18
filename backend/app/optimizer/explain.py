@@ -59,7 +59,7 @@ def explain(
     reasons: list[Reason] = []
 
     # 1. SPLIT_FOR_SLOT
-    # Platform p has more orders in plan than in baseline, and plan's total offer value on p > baseline's.
+    # Platform p has 2+ orders in plan, more than in baseline, and plan's total offer value on p > baseline's.
     plan_platforms = {order[0].platform for order in plan.orders}
     for p in sorted(plan_platforms):
         plan_orders_on_p = [o for o in plan.orders if o[0].platform == p]
@@ -80,7 +80,7 @@ def explain(
             for a in o_res.applied
         )
 
-        if n > n_base and plan_val_on_p > base_val_on_p:
+        if n >= 2 and n > n_base and plan_val_on_p > base_val_on_p:
             amount = plan_val_on_p - base_val_on_p
             line_ids = tuple(sorted(pline.line_id for o in plan_orders_on_p for pline in o))
             text = f"Split {p.capitalize()} into {n} orders to earn {format_inr(amount)} more in offers."

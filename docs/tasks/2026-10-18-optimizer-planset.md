@@ -38,7 +38,7 @@ def explain(plan: Plan, baseline: Plan, offers: Sequence[Offer],
     # sorted by (code order as listed in ReasonCode, platform, line_ids)
 ```
 Rules and **exact** text templates:
-- **SPLIT_FOR_SLOT**: platform `p` has more orders in `plan` than in `baseline`, and the plan's total offer value on `p` is greater than the baseline's.
+- **SPLIT_FOR_SLOT**: platform `p` has **2 or more** orders in `plan` and more than in `baseline`, and the plan's total offer value on `p` is greater than the baseline's.
   `amount` = plan offer value on p − baseline offer value on p. `line_ids` = all of the plan's lines on p.
   Text: `"Split {platform} into {n} orders to earn {amount} more in offers."`, where n is the number of plan orders on p.
 - **DEAD_WEIGHT**: for an order in `plan` that has a **flat** offer `f` applied, where `subtotal - f.min_order >= f.min_order`

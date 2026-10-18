@@ -280,3 +280,24 @@ def test_empty_plan_returns_no_reasons() -> None:
     )
     reasons = explain(empty_plan, empty_plan, [])
     assert reasons == ()
+
+
+def test_no_split_reason_when_a_line_just_moves_onto_a_platform() -> None:
+    # Ghee is cheaper on Blinkit (no membership, ₹25 fee) but lands on Amazon with A1. Baseline has
+    # 0 Amazon orders and the plan has 1: that's a move, not a split.
+    ghee = NeedLine(
+        "ghee",
+        "dairy",
+        1,
+        (Candidate("g-a", "amazon", 58900, 1440), Candidate("g-b", "blinkit", 58500, 10)),
+    )
+    members: dict[Platform, bool] = {
+        "amazon": True, "flipkart": True, "blinkit": False, "instamart": True, "zepto": False
+    }
+    a1 = Offer("A1", "amazon", "flat", min_order=50000, value=5000, uses_left=2)
+    plan = plan_cheapest_now([ghee], [a1], members)
+    base = baseline_plan([ghee], [a1], members)
+    assert [o[0].platform for o in plan.orders] == ["amazon"]
+    codes = [r.code for r in explain(plan, base, [a1])]
+    assert "SPLIT_FOR_SLOT" not in codes
+    assert "MOVED_PLATFORM" in codes
