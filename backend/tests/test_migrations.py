@@ -40,6 +40,7 @@ def test_migrations_create_expected_schema_and_household(tmp_path: Path) -> None
         "auth_session",
         "invite",
         "custom_listing",
+        "source_status",
     }
     assert user_tables == expected_tables
 
@@ -240,6 +241,50 @@ def test_migration_0005_upgrade_preserves_data(tmp_path: Path) -> None:
         row = session.exec(sa.select(shopping_list_table).where(shopping_list_table.c.id == 1)).first()
         assert row is not None
         assert row.name == "Existing List Pre-0005"
+        assert row.household_id == 1
+    engine2.dispose()
+
+
+def test_migration_0006_upgrade_preserves_data(tmp_path: Path) -> None:
+    db_file = tmp_path / "upgrade_0006_test.db"
+    db_url = f"sqlite:///{db_file.resolve()}"
+
+    alembic_cfg = Config(str(Path(__file__).parent.parent / "alembic.ini"))
+    alembic_cfg.set_main_option("sqlalchemy.url", db_url)
+    alembic_cfg.set_main_option("script_location", str(Path(__file__).parent.parent / "migrations"))
+
+    # 1. Upgrade to 0005_custom_listing
+    command.upgrade(alembic_cfg, "0005_custom_listing")
+
+    engine = create_db_engine(db_file)
+    with Session(engine) as session:
+        shopping_list_table = SQLModel.metadata.tables["shopping_list"]
+        session.exec(
+            sa.insert(shopping_list_table).values(
+                id=1,
+                household_id=1,
+                name="Existing List Pre-0006",
+                kind="monthly",
+                archived=False,
+                created_at=datetime.now(UTC),
+            )
+        )
+        session.commit()
+    engine.dispose()
+
+    # 2. Upgrade to head (0006_source_status)
+    command.upgrade(alembic_cfg, "head")
+
+    # 3. Verify existing household 1 data intact and source_status table exists
+    engine2 = create_db_engine(db_file)
+    inspector = sa.inspect(engine2)
+    assert "source_status" in inspector.get_table_names()
+
+    with Session(engine2) as session:
+        shopping_list_table = SQLModel.metadata.tables["shopping_list"]
+        row = session.exec(sa.select(shopping_list_table).where(shopping_list_table.c.id == 1)).first()
+        assert row is not None
+        assert row.name == "Existing List Pre-0006"
         assert row.household_id == 1
     engine2.dispose()
 

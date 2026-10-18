@@ -17,6 +17,8 @@ class Settings:
     smtp_user: str = ""
     smtp_password: str = ""
     smtp_from: str = ""
+    fetchers_enabled: bool = False
+    fetch_interval_hours: int = 6
 
     @property
     def db_url(self) -> str:
@@ -61,6 +63,13 @@ class Settings:
         smtp_password = os.environ.get("SMTP_PASSWORD", "")
         smtp_from = os.environ.get("SMTP_FROM", "")
 
+        fetchers_enabled = os.environ.get("DEALSCOUR_FETCHERS") == "1"
+        fetch_interval_raw = os.environ.get("DEALSCOUR_FETCH_INTERVAL_HOURS", "6")
+        try:
+            fetch_interval_hours = max(2, int(fetch_interval_raw))
+        except ValueError:
+            fetch_interval_hours = 6
+
         static = os.environ.get("DEALSCOUR_STATIC_DIR")
         return cls(
             db_path=db_path_from_env(),
@@ -74,6 +83,8 @@ class Settings:
             smtp_user=smtp_user,
             smtp_password=smtp_password,
             smtp_from=smtp_from,
+            fetchers_enabled=fetchers_enabled,
+            fetch_interval_hours=fetch_interval_hours,
         )
 
 
