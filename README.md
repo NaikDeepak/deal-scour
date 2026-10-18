@@ -45,6 +45,6 @@ Personal and free to run · no auto-checkout, no stored passwords · every price
 the optimizer explains itself · no junk fillers.
 
 ## Self-hosting & license
-Bring your own keys: copy `.env.example` to `.env`, then fill in only the features you want (ADR-022).
+See **[deploy/README.md](deploy/README.md)**: `cp .env.example .env && docker compose up -d --build`. Bring your own keys and fill in only the features you want (ADR-022).
 MIT licensed. See [LICENSE](LICENSE). Not affiliated with Amazon, Flipkart, Blinkit, Swiggy or Zepto.
 Check each platform's terms before enabling any automated price fetcher.

@@ -1,0 +1,33 @@
+# Self-hosted DealScour (ADR-017, ADR-022: bring your own keys via .env).
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - dealscour-data:/data
+    expose:
+      - "8000"
+
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # Set DEALSCOUR_DOMAIN in .env (e.g. deals.example.com) for automatic HTTPS; defaults to localhost.
+      DEALSCOUR_DOMAIN: ${DEALSCOUR_DOMAIN:-localhost}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  dealscour-data:
+  caddy-data:
+  caddy-config:
