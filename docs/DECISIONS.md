@@ -27,6 +27,7 @@ Add new ADRs at the bottom and never rewrite an accepted one. Supersede it inste
 | 020 | Never auto-checkout or store platform credentials | Accepted |
 | 021 | AGENTS.md is canonical; CLAUDE.md imports it | Accepted |
 | 022 | Open source, BYOK: each deployment brings its own keys | Accepted |
+| 023 | Ship the heuristic first; defer CP-SAT until it's needed | Accepted (amends 006) |
 
 ---
 
@@ -188,3 +189,15 @@ need third-party credentials (SMTP, Telegram bot, Web Push VAPID keys, an LLM AP
 or written to the agent notepad. LLM usage stays capped per ADR-016.
 **Consequences.** There's no shared cost, and each user's data and keys stay on their own box. Setup docs must list every key and what it unlocks.
 CI and tests never need real keys.
+
+### ADR-023 · Ship the heuristic first; defer CP-SAT until it's needed
+*2026-10-18 · Accepted · amends ADR-006*
+**Context.** ADR-006 planned CP-SAT as the primary solver with a heuristic fallback. The heuristic (`optimizer/heuristic.py`) was
+measured against exhaustive search: **exact optimum on 150/150 random instances** (≤ 5 lines, up to 2 platforms, mixed flat and
+%-cap offers), never worse than the baseline, and 0.16 s at 40 lines × 5 platforms. OR-Tools is a large dependency (slow installs
+on the dev machine, an extra wheel for every self-hoster).
+**Decision.** The heuristic is the production solver for v1. CP-SAT is deferred. Revisit when any of these happens: a golden or replayed
+real plan where the heuristic is provably beaten; offer kinds 8–14 (multi-buy, Subscribe & Save) make local search weak;
+or instances grow past ~60 lines.
+**Consequences.** No OR-Tools dependency for now. `evaluate_plan` remains the single scorer, so a future CP-SAT model can be
+cross-checked against it and the heuristic. The brute-force cross-checks stay in the test suite as a regression net.
