@@ -23,6 +23,7 @@ const PLAN_LABELS: Record<LabelledPlanOut['label'], { title: string; blurb: stri
 
 interface Product {
   key: string
+  family: string
   title: string
   brand: string
   pack: string
@@ -53,7 +54,7 @@ export default function PlansPage() {
     for (const d of deals) {
       const p = byKey.get(d.product_key)
       if (!p || d.unit_price_paise < p.best.unit_price_paise) {
-        byKey.set(d.product_key, { key: d.product_key, title: d.title, brand: d.brand, pack: d.pack_label, icon: d.icon, best: d })
+        byKey.set(d.product_key, { key: d.product_key, family: d.family_key, title: d.title, brand: d.brand, pack: d.pack_label, icon: d.icon, best: d })
       }
     }
     return [...byKey.values()].sort((a, b) => a.brand.localeCompare(b.brand))
@@ -67,11 +68,14 @@ export default function PlansPage() {
   }
 
   function addNeed(key: string) {
-    if (!key || needs.some((n) => n.product_key === key)) return
-    // line_id is what reasons mention ("Ariel 2L moved to Zepto…"), so make it readable.
     const p = productByKey.get(key)
+    // line_id is what reasons mention ("Ariel 2L moved to Zepto…"), so make it readable.
     const lineId = p ? `${p.brand} ${p.pack}` : key
-    setNeeds([...needs, { line_id: lineId, product_key: key, qty: 1, need_by_minutes: null, lock_platform: null }])
+    if (!key || needs.some((n) => n.line_id === lineId)) return
+    setNeeds([
+      ...needs,
+      { line_id: lineId, product_key: key, family_key: null, quantity: null, qty: 1, need_by_minutes: null, lock_platform: null },
+    ])
     setResult(null)
   }
 
@@ -120,13 +124,31 @@ export default function PlansPage() {
         ) : (
           <ul className="mt-3 divide-y divide-slate-100">
             {needs.map((n) => {
-              const p = productByKey.get(n.product_key)
+              const p = productByKey.get(n.product_key ?? '') ?? products.find((x) => x.family === n.family_key && x.pack === n.quantity)
               return (
                 <li key={n.line_id} className="flex items-center gap-2 py-2 text-sm">
                   <span className="text-lg">{p?.icon}</span>
                   <span className="min-w-0 flex-1 truncate">
                     <span className="font-semibold">{p?.brand}</span> {p?.pack}
                   </span>
+                  <label className="flex items-center gap-1 text-xs text-slate-600">
+                    <input
+                      type="checkbox"
+                      checked={n.family_key !== null}
+                      onChange={(e) =>
+                        setNeeds(
+                          needs.map((x) =>
+                            x !== n || !p
+                              ? x
+                              : e.target.checked
+                                ? { ...x, product_key: null, family_key: p.family, quantity: p.pack }
+                                : { ...x, product_key: p.key, family_key: null, quantity: null },
+                          ),
+                        )
+                      }
+                    />
+                    Any brand
+                  </label>
                   <select
                     aria-label="When do you need it"
                     value={n.need_by_minutes === null ? 'any' : 'today'}
@@ -403,9 +425,13 @@ function OrderCard({ order }: { order: OrderOut }) {
           <li key={l.line_id} className="flex justify-between gap-2">
             <span className="min-w-0 truncate">
               {l.is_filler && <span className="mr-1 rounded bg-slate-100 px-1 text-[10px] font-bold uppercase">filler</span>}
-              {l.title} <span className="text-slate-400">{l.pack_label}</span>
+              {l.title}{' '}
+              <span className="text-slate-400">
+                {l.packs > 1 ? `${l.packs} × ` : ''}
+                {l.pack_label}
+              </span>
             </span>
-            <span className="shrink-0 font-semibold">{formatINR(l.unit_price_paise * l.qty)}</span>
+            <span className="shrink-0 font-semibold">{formatINR(l.line_total_paise)}</span>
           </li>
         ))}
       </ul>
