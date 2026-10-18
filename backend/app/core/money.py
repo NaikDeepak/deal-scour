@@ -1,13 +1,18 @@
+import re
 from decimal import Decimal, InvalidOperation
 
 Paise = int
+
+_WESTERN_COMMA_RE = re.compile(r"^\d{1,3}(?:,\d{3})+$")
+_INDIAN_COMMA_RE = re.compile(r"^\d{1,2}(?:,\d{2})*,\d{3}$")
 
 
 def rupees(amount: str | int) -> Paise:
     """Parse a rupee amount into integer paise.
 
     Accepts an integer or string with up to 2 decimal places and optional commas.
-    Floats raise TypeError. Empty or non-numeric strings, or strings with more than
+    Commas must follow valid Indian or Western digit grouping.
+    Floats raise TypeError. Empty, non-numeric strings, misplaced commas, or strings with more than
     2 decimal places raise ValueError.
     """
     if isinstance(amount, bool) or not isinstance(amount, (str, int)):
@@ -16,24 +21,37 @@ def rupees(amount: str | int) -> Paise:
     if isinstance(amount, int):
         return amount * 100
 
-    cleaned = amount.strip().replace(",", "")
-    if not cleaned:
+    raw = amount.strip()
+    if not raw:
         raise ValueError("amount cannot be empty")
 
-    if "e" in cleaned.lower():
+    sign_stripped = raw[1:] if raw[0] in ("+", "-") else raw
+    if not sign_stripped:
         raise ValueError(f"invalid amount: {amount}")
 
+    if "." in sign_stripped:
+        parts = sign_stripped.split(".")
+        if len(parts) != 2:
+            raise ValueError(f"invalid amount: {amount}")
+        int_part, dec_part = parts
+        if not dec_part.isdigit() or len(dec_part) > 2 or len(dec_part) == 0:
+            raise ValueError(f"invalid decimal places in: {amount}")
+    else:
+        int_part = sign_stripped
+        dec_part = ""
+
+    if "," in int_part:
+        if not (_WESTERN_COMMA_RE.match(int_part) or _INDIAN_COMMA_RE.match(int_part)):
+            raise ValueError(f"misplaced commas in: {amount}")
+    else:
+        if not int_part.isdigit():
+            raise ValueError(f"invalid amount: {amount}")
+
+    cleaned = raw.replace(",", "")
     try:
         d = Decimal(cleaned)
     except InvalidOperation:
         raise ValueError(f"invalid amount: {amount}") from None
-
-    if not d.is_finite():
-        raise ValueError(f"invalid amount: {amount}")
-
-    exp = d.as_tuple().exponent
-    if isinstance(exp, int) and exp < -2:
-        raise ValueError(f"more than 2 decimals in {amount}")
 
     return int(d * 100)
 

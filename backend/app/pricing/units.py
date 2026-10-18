@@ -79,13 +79,22 @@ def parse_pack(label: str) -> Pack:
             return Pack(qty=qty, unit="pc")
         s = rest
 
-    # Multiplier pattern: e.g. "2 x 500g", "2x500g"
+    # Multiplier pattern (prefix): e.g. "2 x 500g", "2x500g"
     mult_match = re.match(r"^(\d+)\s*[xX*]\s*(.+)$", s)
     if mult_match:
         multiplier = int(mult_match.group(1))
         if multiplier <= 0:
             raise ValueError(f"Multiplier must be positive in: {label}")
         sub_pack = parse_pack(mult_match.group(2))
+        return Pack(qty=multiplier * sub_pack.qty, unit=sub_pack.unit)
+
+    # Multiplier pattern (suffix): e.g. "500 g x 2", "500g x 2", "500gx2", "1L x 6"
+    mult_suffix = re.match(r"^(.+?)\s*[xX*]\s*(\d+)$", s)
+    if mult_suffix:
+        multiplier = int(mult_suffix.group(2))
+        if multiplier <= 0:
+            raise ValueError(f"Multiplier must be positive in: {label}")
+        sub_pack = parse_pack(mult_suffix.group(1))
         return Pack(qty=multiplier * sub_pack.qty, unit=sub_pack.unit)
 
     single_match = re.match(r"^([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z]+)$", s)

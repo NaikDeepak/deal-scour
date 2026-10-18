@@ -29,6 +29,20 @@ def test_rupees_invalid() -> None:
         rupees("  ")
 
 
+def test_rupees_comma_placement_26() -> None:
+    # Test 26: accept Indian or western grouping, reject misplaced commas
+    assert rupees("1,250") == 125000
+    assert rupees("1,25,000") == 12500000
+    assert rupees("12,500") == 1250000
+
+    with pytest.raises(ValueError):
+        rupees("1,2,3")
+    with pytest.raises(ValueError):
+        rupees(",100")
+    with pytest.raises(ValueError):
+        rupees("100,")
+
+
 def test_format_inr_valid() -> None:
     assert format_inr(125000) == "₹1,250"
     assert format_inr(12500000) == "₹1,25,000"

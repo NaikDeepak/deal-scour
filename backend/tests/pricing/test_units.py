@@ -23,6 +23,14 @@ def test_parse_pack_valid() -> None:
     assert parse_pack("pack of 6") == Pack(6, "pc")
 
 
+def test_parse_pack_count_after_size_25() -> None:
+    # Test 25: count AFTER the size
+    assert parse_pack("500 g x 2") == Pack(1000, "g")
+    assert parse_pack("500g x 2") == Pack(1000, "g")
+    assert parse_pack("500gx2") == Pack(1000, "g")
+    assert parse_pack("1L x 6") == Pack(6000, "ml")
+
+
 def test_parse_pack_invalid() -> None:
     with pytest.raises(ValueError):
         parse_pack("")
