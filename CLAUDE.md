@@ -4,8 +4,8 @@
 
 ## Claude Code–specific notes
 
-- **Never Read `dealscour_v3.html` whole.** Line 136 is an ~870 KB base64 image. Use
-  `grep -n` and `sed -n 'A,Bp' dealscour_v3.html | cut -c1-200`.
+- **Never Read `prototype/dealscour_v3.html` whole.** Line 136 is an ~870 KB base64 image. Use
+  `grep -n` and `sed -n 'A,Bp' prototype/dealscour_v3.html | cut -c1-200`.
 - Use the docs as your working memory. Before proposing architecture, check `docs/DECISIONS.md`, and don't
   re-litigate an accepted ADR unless the user asks. Record new decisions as an ADR rather than only in chat.
 - For optimizer work, read `docs/BASKET_OPTIMIZER.md` fully first. It defines the objective, offer kinds and
