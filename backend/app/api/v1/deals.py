@@ -1,13 +1,23 @@
-from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from datetime import datetime
+from typing import Annotated
 
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
+from sqlmodel import Session
+
+from app.core import clock
+from app.core.db import current_household_id, get_session
 from app.core.money import Paise
-from app.domain.catalog import load_seed, rate_basis
+from app.domain.catalog import current_listings, rate_basis
 from app.pricing.fee_schedules import SAMPLE_SCHEDULES, Platform
 from app.pricing.landed import discount_bp, unit_price
 from app.pricing.units import unit_rate
 
 router = APIRouter()
+
+HouseholdIdDep = Annotated[int, Depends(current_household_id)]
+SessionDep = Annotated[Session, Depends(get_session)]
+ClockDep = Annotated[datetime, Depends(clock.now)]
 
 _VALID_PLATFORMS: set[str] = {"amazon", "flipkart", "blinkit", "instamart", "zepto"}
 _VALID_SORTS: set[str] = {"unit_rate", "price", "discount", "eta"}
@@ -26,6 +36,10 @@ class DealOut(BaseModel):
     url: str
     coupon_text: str | None
     source: str
+    price_source: str
+    observed_at: datetime | None
+    freshness: str
+    in_stock: bool
     is_member: bool
     listed_paise: Paise
     mrp_paise: Paise
@@ -48,6 +62,9 @@ class DealsResponse(BaseModel):
 
 @router.get("/deals", response_model=DealsResponse)
 def get_deals(
+    household_id: HouseholdIdDep,
+    session: SessionDep,
+    now_dt: ClockDep,
     members: str = Query("amazon,instamart,flipkart"),
     category: str | None = Query(None),
     platform: str | None = Query(None),
@@ -73,14 +90,15 @@ def get_deals(
                 raise HTTPException(status_code=422, detail=f"Invalid platform in members: {m}")
         active_members = set(member_list)
 
-    listings = load_seed()
+    cur_listings = current_listings(session=session, household_id=household_id, now=now_dt)
 
     # Compute deals for all listings
     computed_deals: list[DealOut] = []
     min_rate_by_product: dict[str, int] = {}
     min_rate_by_family: dict[str, int] = {}
 
-    for listing in listings:
+    for cur in cur_listings:
+        listing = cur.listing
         is_mem = listing.platform in active_members
         ip = listing.item_price()
         up = unit_price(ip, is_mem)
@@ -122,6 +140,10 @@ def get_deals(
             url=listing.url,
             coupon_text=listing.coupon_text,
             source=listing.source,
+            price_source=cur.source,
+            observed_at=cur.observed_at,
+            freshness=cur.freshness,
+            in_stock=cur.in_stock,
             is_member=is_mem,
             listed_paise=listing.listed,
             mrp_paise=listing.mrp,

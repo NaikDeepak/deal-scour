@@ -18,7 +18,7 @@ from app.api.v1.plans import (
 from app.core import clock
 from app.core.db import current_household_id, get_session
 from app.core.money import Paise
-from app.domain.catalog import load_seed
+from app.domain.catalog import current_listings
 from app.domain.models import Basket, BasketLine, Need, PlanRun, ShoppingList
 from app.domain.models import Offer as OfferModel
 from app.pricing.fee_schedules import Platform
@@ -228,7 +228,12 @@ def plan_list(
         rho_bp=req.rho_bp,
     )
 
-    plans_resp = run_plan(plans_req)
+    plans_resp = run_plan(
+        plans_req,
+        session=session,
+        household_id=household_id,
+        now_dt=now_dt,
+    )
 
     plan_run = PlanRun(
         household_id=household_id,
@@ -547,6 +552,7 @@ def add_basket_line(
     req: AddLineRequest,
     household_id: HouseholdIdDep,
     session: SessionDep,
+    now_dt: ClockDep,
 ) -> BasketOut:
     basket = session.exec(
         select(Basket).where(Basket.id == id, Basket.household_id == household_id)
@@ -560,13 +566,14 @@ def add_basket_line(
             detail=f"Lines can only be added to pending baskets, current status: {basket.status}",
         )
 
-    seed = load_seed()
-    listing = next((item for item in seed if item.id == req.listing_id), None)
-    if listing is None:
+    current = current_listings(session=session, household_id=household_id, now=now_dt)
+    curr = next((item for item in current if item.listing.id == req.listing_id), None)
+    if curr is None:
         raise HTTPException(
             status_code=422,
             detail=f"Listing not found: {req.listing_id}",
         )
+    listing = curr.listing
 
     if listing.platform != basket.platform:
         raise HTTPException(

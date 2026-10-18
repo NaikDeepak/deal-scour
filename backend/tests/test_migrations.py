@@ -33,6 +33,7 @@ def test_migrations_create_expected_schema_and_household(tmp_path: Path) -> None
         "plan_run",
         "basket",
         "basket_line",
+        "price_observation",
     }
     assert user_tables == expected_tables
 
@@ -90,6 +91,61 @@ def test_migration_0002_upgrade_preserves_data(tmp_path: Path) -> None:
         assert row is not None
         assert row.name == "Test List Pre-Upgrade"
         assert row.kind == "monthly"
+    engine2.dispose()
+
+
+def test_migration_0003_upgrade_preserves_data(tmp_path: Path) -> None:
+    db_file = tmp_path / "upgrade_0003_test.db"
+    db_url = f"sqlite:///{db_file.resolve()}"
+
+    alembic_cfg = Config(str(Path(__file__).parent.parent / "alembic.ini"))
+    alembic_cfg.set_main_option("sqlalchemy.url", db_url)
+    alembic_cfg.set_main_option("script_location", str(Path(__file__).parent.parent / "migrations"))
+
+    # 1. Upgrade to 0002_baskets
+    command.upgrade(alembic_cfg, "0002_baskets")
+
+    engine = create_db_engine(db_file)
+    with Session(engine) as session:
+        basket_table = SQLModel.metadata.tables["basket"]
+        plan_run_table = SQLModel.metadata.tables["plan_run"]
+        session.exec(
+            sa.insert(plan_run_table).values(
+                id=1,
+                household_id=1,
+                request_json="{}",
+                response_json="{}",
+                created_at=datetime.now(UTC),
+            )
+        )
+        session.exec(
+            sa.insert(basket_table).values(
+                id=1,
+                household_id=1,
+                plan_run_id=1,
+                platform="amazon",
+                status="ready",
+                planned_net_paise=50000,
+                created_at=datetime.now(UTC),
+            )
+        )
+        session.commit()
+    engine.dispose()
+
+    # 2. Upgrade to head (0003_price_observation)
+    command.upgrade(alembic_cfg, "head")
+
+    # 3. Verify basket still intact and price_observation table exists
+    engine2 = create_db_engine(db_file)
+    inspector = sa.inspect(engine2)
+    assert "price_observation" in inspector.get_table_names()
+
+    with Session(engine2) as session:
+        basket_table = SQLModel.metadata.tables["basket"]
+        row = session.exec(sa.select(basket_table).where(basket_table.c.id == 1)).first()
+        assert row is not None
+        assert row.platform == "amazon"
+        assert row.planned_net_paise == 50000
     engine2.dispose()
 
 

@@ -1,13 +1,30 @@
+from collections.abc import Generator
+
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy.engine import Engine
+from sqlmodel import Session
 
 from app.api.v1.deals import router
+from app.core.db import get_session
 from app.domain.catalog import load_seed
 from app.pricing.landed import unit_price
 
 app = FastAPI()
 app.include_router(router, prefix="/api/v1")
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _setup_db(engine: Engine) -> Generator[None, None, None]:
+    def override_get_session() -> Generator[Session, None, None]:
+        with Session(engine) as s:
+            yield s
+
+    app.dependency_overrides[get_session] = override_get_session
+    yield
+    app.dependency_overrides.clear()
 
 
 def test_deals_default_members() -> None:
