@@ -26,7 +26,7 @@ Home pincode: 411018 (Pimpri-Chinchwad). The design supports multiple households
 | `prototype/deal_scour_backend.py` | **Prototype / reference only.** Mock catalog + wishlist scan. Do not extend it. |
 | `docs/` | Source of truth for product, architecture, flows, decisions. |
 | `backend/` | **Phase 0.** FastAPI skeleton + pricing core. Target layout in `docs/ARCHITECTURE.md` §3. |
-| `web/` | **Not yet scaffolded.** |
+| `web/` | **Phase 0.** Vite + React + TS + Tailwind v4 shell, `formatINR`, vitest. `pnpm dev` proxies `/api` to :8000. |
 | `docs/tasks/` | Task specs the lead writes for builders (agent-notepad). |
 
 ⚠️ **`prototype/dealscour_v3.html` line 136 is an ~870 KB base64 JPEG.** Never `cat` or fully read the file.
@@ -100,7 +100,7 @@ cd backend && python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
 .venv/bin/alembic upgrade head
 
 # web
-cd web && pnpm i && pnpm dev
+cd web && pnpm install && pnpm dev
 pnpm test && pnpm lint && pnpm typecheck
 
 # everything
