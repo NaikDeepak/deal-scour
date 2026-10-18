@@ -64,30 +64,40 @@ def test_split_for_slot_ex_1() -> None:
 
 
 def test_dead_weight() -> None:
-    # 5. DEAD_WEIGHT: single amazon line 120000, A1 (flat ₹50 >= ₹500) uses 2, line can't be split
-    # -> reason amount 5000, text "₹700 above the ₹500 threshold earns nothing. Split it to earn another ₹50."
-    item = _need("bulk_item", 120000, "amazon")
+    # Two ₹600 lines held in ONE order (max 1 order per platform), A1 (flat ₹50 >= ₹500) uses 2:
+    # the order could be split into two ₹600 orders, so the reason fires.
+    from app.optimizer.planning import PlanSettings
+
+    a = _need("a", 60000, "amazon")
+    b = _need("b", 60000, "amazon")
     a1 = Offer(
-        id="A1",
-        platform="amazon",
-        kind="flat",
-        min_order=50000,
-        value=5000,
-        uses_left=2,
-        value_type="cash",
+        id="A1", platform="amazon", kind="flat", min_order=50000, value=5000, uses_left=2, value_type="cash"
     )
     memberships = {"amazon": True}
-    base = baseline_plan([item], [a1], memberships)
-    plan = plan_cheapest_now([item], [a1], memberships)
+    base = baseline_plan([a, b], [a1], memberships)
+    plan = plan_cheapest_now([a, b], [a1], memberships, settings=PlanSettings(max_orders_per_platform=1))
 
-    reasons = explain(plan, base, [a1])
-    dead_weights = [r for r in reasons if r.code == "DEAD_WEIGHT"]
+    dead_weights = [r for r in explain(plan, base, [a1]) if r.code == "DEAD_WEIGHT"]
     assert len(dead_weights) == 1
     r = dead_weights[0]
-    assert r.platform == "amazon"
     assert r.amount == 5000
-    assert r.line_ids == ("bulk_item",)
+    assert r.line_ids == ("a", "b")
     assert r.text == "₹700 above the ₹500 threshold earns nothing. Split it to earn another ₹50."
+
+
+def test_no_dead_weight_when_no_valid_split() -> None:
+    # One ₹1,200 item can't be split; ₹665 + ₹344 can't make two ₹500 orders. Neither gets the hint.
+    a1 = Offer(
+        id="A1", platform="amazon", kind="flat", min_order=50000, value=5000, uses_left=2, value_type="cash"
+    )
+    memberships = {"amazon": True}
+    for needs in (
+        [_need("bulk", 120000, "amazon")],
+        [_need("oil", 66500, "amazon"), _need("surf", 34400, "amazon")],
+    ):
+        base = baseline_plan(needs, [a1], memberships)
+        plan = plan_cheapest_now(needs, [a1], memberships)
+        assert not [r for r in explain(plan, base, [a1]) if r.code == "DEAD_WEIGHT"]
 
 
 def test_moved_platform_ex_5() -> None:
@@ -292,7 +302,11 @@ def test_no_split_reason_when_a_line_just_moves_onto_a_platform() -> None:
         (Candidate("g-a", "amazon", 58900, 1440), Candidate("g-b", "blinkit", 58500, 10)),
     )
     members: dict[Platform, bool] = {
-        "amazon": True, "flipkart": True, "blinkit": False, "instamart": True, "zepto": False
+        "amazon": True,
+        "flipkart": True,
+        "blinkit": False,
+        "instamart": True,
+        "zepto": False,
     }
     a1 = Offer("A1", "amazon", "flat", min_order=50000, value=5000, uses_left=2)
     plan = plan_cheapest_now([ghee], [a1], members)

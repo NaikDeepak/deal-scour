@@ -198,8 +198,8 @@ def test_empty_needs() -> None:
 
 
 def test_dead_weight_in_planset() -> None:
-    # 5. DEAD_WEIGHT: single amazon line 120000, A1 (flat ₹50 >= ₹500) uses 2, line can't be split
-    # -> reason amount 5000, text "₹700 above the ₹500 threshold earns nothing. Split it to earn another ₹50."
+    # A single ₹1,200 item can't be split into two ₹500+ orders, so plan() gives no DEAD_WEIGHT hint
+    # (it appears only when a real split exists, e.g. max_orders_per_platform=1; see test_explain).
     item = _need("item", 120000, "amazon")
     a1 = Offer(
         id="A1",
@@ -216,8 +216,5 @@ def test_dead_weight_in_planset() -> None:
         memberships={"amazon": True},
     )
     cn = pset.plans[0]
-    dw = [r for r in cn.reasons if r.code == "DEAD_WEIGHT"]
-    assert len(dw) == 1
-    assert dw[0].amount == 5000
-    assert dw[0].text == "₹700 above the ₹500 threshold earns nothing. Split it to earn another ₹50."
+    assert not [r for r in cn.reasons if r.code == "DEAD_WEIGHT"]
 

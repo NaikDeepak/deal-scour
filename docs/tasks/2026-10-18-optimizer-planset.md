@@ -41,7 +41,7 @@ Rules and **exact** text templates:
 - **SPLIT_FOR_SLOT**: platform `p` has **2 or more** orders in `plan` and more than in `baseline`, and the plan's total offer value on `p` is greater than the baseline's.
   `amount` = plan offer value on p − baseline offer value on p. `line_ids` = all of the plan's lines on p.
   Text: `"Split {platform} into {n} orders to earn {amount} more in offers."`, where n is the number of plan orders on p.
-- **DEAD_WEIGHT**: for an order in `plan` that has a **flat** offer `f` applied, where `subtotal - f.min_order >= f.min_order`
+- **DEAD_WEIGHT**: for an order in `plan` that has a **flat** offer `f` applied, whose lines can really be divided into two orders that both reach `f.min_order`
   and `f.uses_left` > the number of plan orders using `f`. `amount = f.value`.
   Text: `"{excess} above the {min} threshold earns nothing. Split it to earn another {value}."`, where excess = subtotal − min.
 - **MOVED_PLATFORM**: a line whose platform in `plan` differs from its platform in `baseline`. `amount` = plan unit_price × qty −
