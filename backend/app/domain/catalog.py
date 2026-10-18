@@ -12,6 +12,7 @@ from app.pricing.units import Pack, Unit, default_basis, parse_pack
 class SeedListing:
     id: str
     product_key: str
+    family_key: str
     category: str
     title: str
     brand: str
@@ -50,6 +51,7 @@ def load_seed() -> list[SeedListing]:
         listing = SeedListing(
             id=item["id"],
             product_key=item["product_key"],
+            family_key=item["family_key"],
             category=item["category"],
             title=item["title"],
             brand=item["brand"],
