@@ -382,6 +382,3 @@ def post_plans(req: PlansRequest) -> PlansResponse:
         )
 
     return PlansResponse(baseline=baseline_out, plans=plans_out)
-
-
-# HOOK: app.include_router(plans.router, prefix="/api/v1") in app/main.py (wired by lead)

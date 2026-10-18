@@ -11,3 +11,11 @@ export function formatINR(paise: number): string {
   const grouped = head ? head.replace(/\B(?=(\d{2})+(?!\d))/g, ',') + ',' + last3 : last3
   return `${sign}₹${grouped}${rest ? '.' + rest.toString().padStart(2, '0') : ''}`
 }
+
+// Parse a rupee amount typed by the user ("500", "1,250", "49.5") into integer paise. null if invalid.
+export function parseRupees(input: string): number | null {
+  const s = input.trim().replace(/,/g, '')
+  if (!/^\d+(\.\d{1,2})?$/.test(s)) return null
+  const [whole, frac = ''] = s.split('.')
+  return Number(whole) * 100 + Number(frac.padEnd(2, '0'))
+}
