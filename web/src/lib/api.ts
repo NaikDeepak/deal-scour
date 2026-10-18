@@ -303,3 +303,47 @@ export const auth = {
   invite: () => call<{ invite_code: string; expires_at: string }>('/api/v1/households/invites', { method: 'POST' }),
   removeMember: (userId: number) => call<unknown>(`/api/v1/households/members/${userId}`, { method: 'DELETE' }),
 }
+
+// ---- Custom listings + fetcher (backend/app/api/v1/{listings,sources}.py) ----
+
+export interface ProductRef {
+  platform: Platform
+  sku: string
+  url: string
+}
+
+export interface NewListing {
+  url: string
+  title: string
+  brand: string
+  pack_label: string
+  category: string
+  family_key: string
+  listed_paise: number
+  mrp_paise: number
+  member_price_paise: number | null
+  in_stock: boolean
+}
+
+export interface Family {
+  family_key: string
+  count: number
+  units: string[]
+}
+
+export interface SourceStatus {
+  platform: Platform
+  enabled_by_config: boolean
+  consecutive_failures: number
+  disabled_until: string | null
+  last_success_at: string | null
+  last_error: string | null
+}
+
+export const catalog = {
+  parseLink: (url: string) => call<ProductRef>('/api/v1/listings/parse', json({ url })),
+  addListing: (l: NewListing) => call<{ listing_id: string; product_key: string }>('/api/v1/listings', json(l)),
+  families: () => call<Family[]>('/api/v1/catalog/families'),
+  refreshPrices: () => call<{ queued: number }>('/api/v1/sources/refresh', { method: 'POST' }),
+  sourceStatus: () => call<{ platforms: SourceStatus[]; quick_commerce: string }>('/api/v1/sources/status'),
+}

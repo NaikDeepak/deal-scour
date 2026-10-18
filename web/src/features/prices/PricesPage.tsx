@@ -4,6 +4,8 @@ import { formatINR, parseRupees } from '../../lib/money'
 import { usePreference } from '../../lib/preference'
 import { useProducts } from '../../lib/products'
 import { Card, ErrorNote, inputClass, SectionTitle } from '../../lib/ui'
+import AddProduct from './AddProduct'
+import FetcherStatus from './FetcherStatus'
 
 const FRESHNESS: Record<Deal['freshness'], { label: string; className: string }> = {
   fresh: { label: 'Fresh', className: 'bg-emerald-100 text-emerald-800' },
@@ -37,6 +39,8 @@ export default function PricesPage() {
 
   return (
     <div className="space-y-4">
+      <AddProduct onAdded={() => setReload((n) => n + 1)} />
+      <FetcherStatus onRefreshed={() => setReload((n) => n + 1)} />
       <Card>
         <SectionTitle>Prices you've seen</SectionTitle>
         <p className="mt-1 text-xs text-slate-500">
