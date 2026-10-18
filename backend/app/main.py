@@ -5,7 +5,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import IntegrityError
 
-from app.api.v1 import baskets, deals, lists, offers, plans
+from app.api.v1 import baskets, deals, lists, offers, plans, prices
 from app.core.config import get_settings
 
 app = FastAPI(title="DealScour", version="0.1.0")
@@ -14,6 +14,7 @@ app.include_router(plans.router, prefix="/api/v1")
 app.include_router(lists.router, prefix="/api/v1")
 app.include_router(offers.router, prefix="/api/v1")
 app.include_router(baskets.router, prefix="/api/v1")
+app.include_router(prices.router, prefix="/api/v1")
 
 
 @app.exception_handler(IntegrityError)

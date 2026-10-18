@@ -1,5 +1,10 @@
-from fastapi.testclient import TestClient
+from collections.abc import Generator
 
+from fastapi.testclient import TestClient
+from sqlalchemy.engine import Engine
+from sqlmodel import Session
+
+from app.core.db import get_session
 from app.main import app
 
 
@@ -9,17 +14,33 @@ def test_health() -> None:
     assert res.json() == {"status": "ok"}
 
 
-def test_deals_router_is_mounted() -> None:
-    res = TestClient(app).get("/api/v1/deals", params={"q": "aashirvaad"})
-    assert res.status_code == 200
-    assert res.json()["count"] == 3
+def test_deals_router_is_mounted(engine: Engine) -> None:
+    def override_get_session() -> Generator[Session, None, None]:
+        with Session(engine) as s:
+            yield s
+
+    app.dependency_overrides[get_session] = override_get_session
+    try:
+        res = TestClient(app).get("/api/v1/deals", params={"q": "aashirvaad"})
+        assert res.status_code == 200
+        assert res.json()["count"] == 3
+    finally:
+        app.dependency_overrides.clear()
 
 
-def test_plans_router_is_mounted() -> None:
-    body = {"needs": [{"line_id": "atta", "product_key": "aashirvaad_select_atta_5kg", "qty": 1}]}
-    res = TestClient(app).post("/api/v1/plans", json=body)
-    assert res.status_code == 200
-    assert res.json()["plans"][0]["label"] == "cheapest_now"
+def test_plans_router_is_mounted(engine: Engine) -> None:
+    def override_get_session() -> Generator[Session, None, None]:
+        with Session(engine) as s:
+            yield s
+
+    app.dependency_overrides[get_session] = override_get_session
+    try:
+        body = {"needs": [{"line_id": "atta", "product_key": "aashirvaad_select_atta_5kg", "qty": 1}]}
+        res = TestClient(app).post("/api/v1/plans", json=body)
+        assert res.status_code == 200
+        assert res.json()["plans"][0]["label"] == "cheapest_now"
+    finally:
+        app.dependency_overrides.clear()
 
 
 def test_integrity_error_maps_to_409() -> None:

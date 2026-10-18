@@ -136,3 +136,29 @@ class BasketLine(SQLModel, table=True):
     line_total_paise: int
     is_filler: bool = Field(default=False)
 
+
+class PriceObservation(SQLModel, table=True):
+    __tablename__ = "price_observation"
+    __table_args__ = (
+        Index(
+            "ix_price_observation_household_listing_observed",
+            "household_id",
+            "listing_id",
+            "observed_at",
+        ),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    household_id: int = Field(foreign_key="household.id")
+    listing_id: str
+    listed_paise: int
+    mrp_paise: int
+    member_price_paise: int | None = Field(default=None)
+    in_stock: bool = Field(default=True)
+    eta_minutes: int | None = Field(default=None)
+    source: str = Field(default="manual")
+    note: str | None = Field(default=None, max_length=120)
+    observed_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC)
+    )
+
