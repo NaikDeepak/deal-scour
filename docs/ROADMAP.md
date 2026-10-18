@@ -4,12 +4,12 @@
 
 ## Phase 0: Foundation (≈ 1 week)
 - [x] `git init`, move prototype files → `prototype/` (ADR-018), and strip nothing.
-- [ ] Scaffold `backend/` (venv+pip, FastAPI, SQLModel, Alembic, ruff, mypy, pytest) and `web/` (Vite, React, TS, Tailwind, PWA plugin).
+- [x] Scaffold `backend/` (venv+pip, FastAPI, SQLModel, Alembic, ruff, mypy, pytest) and `web/` (Vite, React, TS, Tailwind, PWA plugin).
 - [x] `core/money.py` (paise helpers), `pricing/units.py`, `pricing/fee_schedules.py`, `pricing/landed.py` with tests.
 - [x] Seed file with the 28 prototype listings as `source="sample"` (walnuts get their own product) → `backend/app/seed/prototype_catalog.json`.
 - [ ] `docker-compose.yml` + Caddy, running locally.
 
-**Exit:** `GET /deals` returns correct membership-aware landed prices and unit rates, with order-level fees shown separately.
+**Exit:** `GET /deals` returns correct membership-aware landed prices and unit rates, with order-level fees shown separately. ✅ Met 2026-10-18 (`GET /api/v1/deals`).
 
 ## Phase 1: MVP: lists, offers, optimizer, pending baskets (≈ 3 weeks)
 - [ ] Auth (email OTP, invite link), single household.
