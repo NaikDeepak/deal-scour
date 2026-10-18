@@ -21,6 +21,7 @@ export interface Deal {
   platform: Platform
   pack_label: string
   icon: string
+  url: string
   unit_price_paise: number
   unit_rate_paise: number
   rate_basis_label: string
@@ -135,4 +136,109 @@ export function fetchDeals(members: Platform[]): Promise<{ count: number; deals:
 
 export function requestPlans(req: PlanRequest): Promise<PlanSetOut> {
   return call('/api/v1/plans', { method: 'POST', body: JSON.stringify(req) })
+}
+
+// ---- Saved data: lists, offers, baskets (backend/app/api/v1/{lists,offers,baskets}.py) ----
+
+export interface ListSummary {
+  id: number
+  name: string
+  kind: 'quick' | 'monthly' | 'event'
+  archived: boolean
+  created_at: string
+  open_needs: number
+}
+
+export interface SavedNeed {
+  id: number
+  list_id: number
+  line_id: string
+  product_key: string | null
+  family_key: string | null
+  quantity: string | null
+  qty: number
+  need_by_minutes: number | null
+  lock_platform: Platform | null
+  status: 'open' | 'planned' | 'bought' | 'dropped'
+}
+
+export interface ListDetail extends Omit<ListSummary, 'open_needs'> {
+  needs: SavedNeed[]
+}
+
+export interface SavedOffer extends Omit<OfferIn, 'id'> {
+  id: number
+  code: string
+  valid_to: string | null
+  note: string | null
+  archived: boolean
+}
+
+export interface BasketLine {
+  id: number
+  listing_id: string
+  line_id: string
+  title: string
+  pack_label: string
+  packs: number
+  unit_price_paise: number
+  line_total_paise: number
+  is_filler: boolean
+}
+
+export type BasketStatus = 'ready' | 'pending' | 'placed' | 'settled' | 'released'
+
+export interface Basket {
+  id: number
+  plan_run_id: number
+  platform: Platform
+  status: BasketStatus
+  target_offer_code: string | null
+  threshold_paise: number | null
+  shortfall_paise: number | null
+  planned_net_paise: number
+  offer_value_expected_paise: number
+  actual_paid_paise: number | null
+  offer_value_received_paise: number | null
+  placed_at: string | null
+  created_at: string
+  lines: BasketLine[]
+}
+
+export interface Ledger {
+  placed_count: number
+  paid_paise: number
+  offer_expected_paise: number
+  offer_received_paise: number
+  cashback_pending_paise: number
+}
+
+const json = (body: unknown): RequestInit => ({ method: 'POST', body: JSON.stringify(body) })
+
+export const api = {
+  lists: () => call<ListSummary[]>('/api/v1/lists'),
+  createList: (name: string, kind: ListSummary['kind']) => call<ListSummary>('/api/v1/lists', json({ name, kind })),
+  list: (id: number) => call<ListDetail>(`/api/v1/lists/${id}`),
+  addNeed: (listId: number, need: Omit<NeedIn, 'line_id'> & { line_id: string }) =>
+    call<SavedNeed>(`/api/v1/lists/${listId}/needs`, json(need)),
+  updateNeed: (id: number, patch: Partial<SavedNeed>) =>
+    call<SavedNeed>(`/api/v1/needs/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  dropNeed: (id: number) => call<SavedNeed>(`/api/v1/needs/${id}`, { method: 'DELETE' }),
+  planList: (listId: number, members: Platform[], fillers: FillerIn[]) =>
+    call<PlanSetOut & { plan_run_id: number }>(`/api/v1/lists/${listId}/plan`, json({ members, fillers })),
+  accept: (runId: number, label: string) => call<Basket[]>(`/api/v1/plan-runs/${runId}/accept`, json({ label })),
+
+  offers: (includeArchived = false) => call<SavedOffer[]>(`/api/v1/offers?include_archived=${includeArchived}`),
+  createOffer: (offer: Omit<OfferIn, 'id'> & { code: string; valid_to?: string | null; note?: string | null }) =>
+    call<SavedOffer>('/api/v1/offers', json(offer)),
+  archiveOffer: (id: number) => call<SavedOffer>(`/api/v1/offers/${id}/archive`, { method: 'POST' }),
+
+  baskets: () => call<Basket[]>('/api/v1/baskets'),
+  place: (id: number, actualPaid: number, withoutOffer = false) =>
+    call<Basket>(`/api/v1/baskets/${id}/place`, json({ actual_paid_paise: actualPaid, without_offer: withoutOffer })),
+  cashback: (id: number, received: number) => call<Basket>(`/api/v1/baskets/${id}/cashback`, json({ received_paise: received })),
+  release: (id: number) => call<Basket>(`/api/v1/baskets/${id}/release`, { method: 'POST' }),
+  addLine: (id: number, listingId: string, lineId: string) =>
+    call<Basket>(`/api/v1/baskets/${id}/lines`, json({ listing_id: listingId, line_id: lineId })),
+  ledger: () => call<Ledger>('/api/v1/ledger/summary'),
 }

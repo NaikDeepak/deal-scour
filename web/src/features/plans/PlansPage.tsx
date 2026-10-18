@@ -1,19 +1,20 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  fetchDeals,
+  api,
   PLATFORM_META,
   PLATFORMS,
-  requestPlans,
-  type Deal,
-  type FillerIn,
   type LabelledPlanOut,
-  type NeedIn,
-  type OfferIn,
+  type ListDetail,
+  type ListSummary,
   type OrderOut,
   type Platform,
   type PlanSetOut,
+  type SavedNeed,
 } from '../../lib/api'
-import { formatINR, parseRupees } from '../../lib/money'
+import { formatINR } from '../../lib/money'
+import { usePreference } from '../../lib/preference'
+import { useProducts, type Product } from '../../lib/products'
+import { Card, ErrorNote, SectionTitle } from '../../lib/ui'
 
 const PLAN_LABELS: Record<LabelledPlanOut['label'], { title: string; blurb: string }> = {
   cheapest_now: { title: 'Cheapest now', blurb: 'Everything ordered today' },
@@ -21,129 +22,186 @@ const PLAN_LABELS: Record<LabelledPlanOut['label'], { title: string; blurb: stri
   fastest: { title: 'Fastest', blurb: 'Quickest delivery for every item' },
 }
 
-interface Product {
-  key: string
-  family: string
-  title: string
-  brand: string
-  pack: string
-  icon: string
-  best: Deal
-}
-
-type OfferTemplate = 'flat' | 'pct_cap'
-
-export default function PlansPage() {
-  const [members, setMembers] = useState<Platform[]>(['amazon', 'instamart', 'flipkart'])
-  const [deals, setDeals] = useState<Deal[]>([])
-  const [needs, setNeeds] = useState<NeedIn[]>([])
-  const [fillers, setFillers] = useState<string[]>([]) // product keys you'd buy anyway
-  const [offers, setOffers] = useState<OfferIn[]>([])
-  const [result, setResult] = useState<PlanSetOut | null>(null)
+export default function PlansPage({ onAccepted }: { onAccepted: () => void }) {
+  const [members, setMembers] = usePreference<Platform[]>('members', ['amazon', 'instamart', 'flipkart'])
+  const [fillers, setFillers] = usePreference<string[]>('fillers', [])
+  const [listId, setListId] = usePreference<number | null>('listId', null)
+  const [lists, setLists] = useState<ListSummary[]>([])
+  const [list, setList] = useState<ListDetail | null>(null)
+  const [result, setResult] = useState<(PlanSetOut & { plan_run_id: number }) | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-
-  useEffect(() => {
-    fetchDeals(members)
-      .then((r) => setDeals(r.deals))
-      .catch((e: Error) => setError(e.message))
-  }, [members])
-
-  const products = useMemo(() => {
-    const byKey = new Map<string, Product>()
-    for (const d of deals) {
-      const p = byKey.get(d.product_key)
-      if (!p || d.unit_price_paise < p.best.unit_price_paise) {
-        byKey.set(d.product_key, { key: d.product_key, family: d.family_key, title: d.title, brand: d.brand, pack: d.pack_label, icon: d.icon, best: d })
-      }
-    }
-    return [...byKey.values()].sort((a, b) => a.brand.localeCompare(b.brand))
-  }, [deals])
-
+  const [busy, setBusy] = useState(false)
+  const { deals, products } = useProducts(members)
   const productByKey = useMemo(() => new Map(products.map((p) => [p.key, p])), [products])
 
-  function toggleMember(p: Platform) {
-    setMembers((m) => (m.includes(p) ? m.filter((x) => x !== p) : [...m, p]))
-    setResult(null)
+  const loadLists = useCallback(async () => {
+    try {
+      let all = await api.lists()
+      if (all.length === 0) {
+        await api.createList('This month', 'monthly')
+        all = await api.lists()
+      }
+      setLists(all)
+      if (listId === null || !all.some((l) => l.id === listId)) setListId(all[0].id)
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }, [listId, setListId])
+
+  const loadList = useCallback(async () => {
+    if (listId === null) return
+    try {
+      setList(await api.list(listId))
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }, [listId])
+
+  useEffect(() => {
+    void loadLists()
+  }, [loadLists])
+  useEffect(() => {
+    void loadList()
+  }, [loadList])
+
+  const openNeeds = (list?.needs ?? []).filter((n) => n.status === 'open')
+
+  async function run(action: () => Promise<unknown>) {
+    setBusy(true)
+    setError(null)
+    try {
+      await action()
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
   }
 
   function addNeed(key: string) {
     const p = productByKey.get(key)
-    // line_id is what reasons mention ("Ariel 2L moved to Zepto…"), so make it readable.
-    const lineId = p ? `${p.brand} ${p.pack}` : key
-    if (!key || needs.some((n) => n.line_id === lineId)) return
-    setNeeds([
-      ...needs,
-      { line_id: lineId, product_key: key, family_key: null, quantity: null, qty: 1, need_by_minutes: null, lock_platform: null },
-    ])
-    setResult(null)
+    if (!p || listId === null) return
+    const lineId = `${p.brand} ${p.pack}`
+    if (openNeeds.some((n) => n.line_id === lineId)) return
+    void run(async () => {
+      await api.addNeed(listId, { line_id: lineId, product_key: key, family_key: null, quantity: null, qty: 1, need_by_minutes: null, lock_platform: null })
+      setResult(null)
+      await Promise.all([loadList(), loadLists()])
+    })
   }
 
-  async function plan() {
-    setLoading(true)
-    setError(null)
-    try {
-      const fillerListings: FillerIn[] = deals
-        .filter((d) => fillers.includes(d.product_key) && !needs.some((n) => n.product_key === d.product_key))
-        .map((d) => ({ filler_id: `${d.product_key}@${d.platform}`, listing_id: d.id, score: 3 }))
-      setResult(await requestPlans({ members, needs, offers, fillers: fillerListings }))
-    } catch (e) {
-      setError((e as Error).message)
-    } finally {
-      setLoading(false)
-    }
+  function patchNeed(n: SavedNeed, patch: Partial<SavedNeed>) {
+    void run(async () => {
+      await api.updateNeed(n.id, patch)
+      setResult(null)
+      await Promise.all([loadList(), loadLists()])
+    })
+  }
+
+  function dropNeed(n: SavedNeed) {
+    void run(async () => {
+      await api.dropNeed(n.id)
+      setResult(null)
+      await Promise.all([loadList(), loadLists()])
+    })
+  }
+
+  function plan() {
+    if (listId === null) return
+    void run(async () => {
+      const fillerListings = deals
+        .filter((d) => fillers.includes(d.product_key) && !openNeeds.some((n) => n.product_key === d.product_key))
+        .map((d) => ({ filler_id: `${d.brand} ${d.pack_label} (${PLATFORM_META[d.platform].name})`, listing_id: d.id, score: 3 }))
+      setResult(await api.planList(listId, members, fillerListings))
+    })
+  }
+
+  function accept(label: string) {
+    if (!result) return
+    void run(async () => {
+      await api.accept(result.plan_run_id, label)
+      setResult(null)
+      await Promise.all([loadList(), loadLists()])
+      onAccepted()
+    })
+  }
+
+  function newList() {
+    const name = `List ${new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`
+    void run(async () => {
+      const created = await api.createList(name, 'quick')
+      await loadLists()
+      setListId(created.id)
+    })
   }
 
   return (
     <div className="space-y-5">
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <h2 className="text-sm font-bold uppercase tracking-wide text-slate-500">Memberships</h2>
+      <Card>
+        <SectionTitle>Memberships</SectionTitle>
         <div className="mt-2 flex flex-wrap gap-2">
           {PLATFORMS.map((p) => (
             <button
               key={p}
               type="button"
-              onClick={() => toggleMember(p)}
+              onClick={() => {
+                setMembers(members.includes(p) ? members.filter((x) => x !== p) : [...members, p])
+                setResult(null)
+              }}
               className={`rounded-full border px-3 py-1 text-xs font-semibold ${
-                members.includes(p)
-                  ? 'border-emerald-500 bg-emerald-50 text-emerald-800'
-                  : 'border-slate-200 bg-slate-50 text-slate-500'
+                members.includes(p) ? 'border-emerald-500 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-slate-50 text-slate-500'
               }`}
             >
               {PLATFORM_META[p].membership} {members.includes(p) ? 'on' : 'off'}
             </button>
           ))}
         </div>
-      </section>
+      </Card>
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <h2 className="text-sm font-bold uppercase tracking-wide text-slate-500">Your list</h2>
+      <Card>
+        <div className="flex items-center justify-between gap-2">
+          <select
+            aria-label="Shopping list"
+            value={listId ?? ''}
+            onChange={(e) => {
+              setListId(Number(e.target.value))
+              setResult(null)
+            }}
+            className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm font-bold"
+          >
+            {lists.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.name} ({l.open_needs} to buy)
+              </option>
+            ))}
+          </select>
+          <button type="button" onClick={newList} className="shrink-0 text-xs font-semibold text-orange-700">
+            + New list
+          </button>
+        </div>
         <ProductPicker products={products} onPick={addNeed} placeholder="Add an item…" />
-        {needs.length === 0 ? (
-          <p className="mt-3 text-sm text-slate-500">Add what you need. Mark items "no rush" so they can wait for a better basket.</p>
+        {openNeeds.length === 0 ? (
+          <p className="mt-3 text-sm text-slate-500">Nothing to buy yet. Mark items "no rush" so they can wait for a better basket.</p>
         ) : (
           <ul className="mt-3 divide-y divide-slate-100">
-            {needs.map((n) => {
+            {openNeeds.map((n) => {
               const p = productByKey.get(n.product_key ?? '') ?? products.find((x) => x.family === n.family_key && x.pack === n.quantity)
               return (
-                <li key={n.line_id} className="flex items-center gap-2 py-2 text-sm">
+                <li key={n.id} className="flex flex-wrap items-center gap-2 py-2 text-sm">
                   <span className="text-lg">{p?.icon}</span>
-                  <span className="min-w-0 flex-1 truncate">
-                    <span className="font-semibold">{p?.brand}</span> {p?.pack}
-                  </span>
+                  <span className="min-w-0 flex-1 truncate font-semibold">{n.line_id}</span>
                   <label className="flex items-center gap-1 text-xs text-slate-600">
                     <input
                       type="checkbox"
                       checked={n.family_key !== null}
+                      disabled={!p}
                       onChange={(e) =>
-                        setNeeds(
-                          needs.map((x) =>
-                            x !== n || !p
-                              ? x
-                              : e.target.checked
-                                ? { ...x, product_key: null, family_key: p.family, quantity: p.pack }
-                                : { ...x, product_key: p.key, family_key: null, quantity: null },
-                          ),
+                        p &&
+                        patchNeed(
+                          n,
+                          e.target.checked
+                            ? { product_key: null, family_key: p.family, quantity: p.pack }
+                            : { product_key: p.key, family_key: null, quantity: null },
                         )
                       }
                     />
@@ -152,20 +210,13 @@ export default function PlansPage() {
                   <select
                     aria-label="When do you need it"
                     value={n.need_by_minutes === null ? 'any' : 'today'}
-                    onChange={(e) =>
-                      setNeeds(needs.map((x) => (x === n ? { ...x, need_by_minutes: e.target.value === 'today' ? 60 : null } : x)))
-                    }
+                    onChange={(e) => patchNeed(n, { need_by_minutes: e.target.value === 'today' ? 60 : null })}
                     className="rounded border border-slate-200 bg-white px-1 py-0.5 text-xs"
                   >
                     <option value="any">No rush</option>
                     <option value="today">Within 1 hour</option>
                   </select>
-                  <button
-                    type="button"
-                    aria-label={`Remove ${p?.brand}`}
-                    onClick={() => setNeeds(needs.filter((x) => x !== n))}
-                    className="px-1 text-rose-500"
-                  >
+                  <button type="button" aria-label={`Remove ${n.line_id}`} onClick={() => dropNeed(n)} className="px-1 text-rose-500">
                     ✕
                   </button>
                 </li>
@@ -173,12 +224,10 @@ export default function PlansPage() {
             })}
           </ul>
         )}
-      </section>
+      </Card>
 
-      <OfferWallet offers={offers} setOffers={setOffers} />
-
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <h2 className="text-sm font-bold uppercase tracking-wide text-slate-500">Would buy anyway (fillers)</h2>
+      <Card>
+        <SectionTitle>Would buy anyway (fillers)</SectionTitle>
         <p className="mt-1 text-xs text-slate-500">Restock items that can top up a basket that falls short of an offer.</p>
         <ProductPicker
           products={products}
@@ -187,48 +236,31 @@ export default function PlansPage() {
         />
         <div className="mt-2 flex flex-wrap gap-1.5">
           {fillers.map((k) => (
-            <button
-              key={k}
-              type="button"
-              onClick={() => setFillers(fillers.filter((x) => x !== k))}
-              className="rounded-full bg-slate-100 px-2.5 py-1 text-xs"
-            >
+            <button key={k} type="button" onClick={() => setFillers(fillers.filter((x) => x !== k))} className="rounded-full bg-slate-100 px-2.5 py-1 text-xs">
               {productByKey.get(k)?.brand} {productByKey.get(k)?.pack} ✕
             </button>
           ))}
         </div>
-      </section>
+      </Card>
 
       <button
         type="button"
-        disabled={needs.length === 0 || loading}
+        disabled={openNeeds.length === 0 || busy}
         onClick={plan}
         className="w-full rounded-xl bg-orange-600 py-3 text-sm font-bold text-white shadow disabled:opacity-40"
       >
-        {loading ? 'Planning…' : 'Plan my list'}
+        {busy ? 'Working…' : 'Plan my list with my offers'}
       </button>
 
-      {error && <p className="rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}
-      {result && <Results result={result} />}
+      <ErrorNote error={error} />
+      {result && <Results result={result} onAccept={accept} busy={busy} />}
     </div>
   )
 }
 
-function ProductPicker({
-  products,
-  onPick,
-  placeholder,
-}: {
-  products: Product[]
-  onPick: (key: string) => void
-  placeholder: string
-}) {
+function ProductPicker({ products, onPick, placeholder }: { products: Product[]; onPick: (key: string) => void; placeholder: string }) {
   return (
-    <select
-      value=""
-      onChange={(e) => onPick(e.target.value)}
-      className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
-    >
+    <select value="" onChange={(e) => onPick(e.target.value)} className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
       <option value="">{placeholder}</option>
       {products.map((p) => (
         <option key={p.key} value={p.key}>
@@ -239,116 +271,7 @@ function ProductPicker({
   )
 }
 
-function OfferWallet({ offers, setOffers }: { offers: OfferIn[]; setOffers: (o: OfferIn[]) => void }) {
-  const [platform, setPlatform] = useState<Platform>('amazon')
-  const [template, setTemplate] = useState<OfferTemplate>('flat')
-  const [minOrder, setMinOrder] = useState('500')
-  const [value, setValue] = useState('50')
-  const [rate, setRate] = useState('10')
-  const [uses, setUses] = useState('2')
-  const [formError, setFormError] = useState<string | null>(null)
-
-  function add() {
-    const min = parseRupees(minOrder)
-    const val = parseRupees(value)
-    const usesN = Number(uses)
-    const rateN = Number(rate)
-    if (min === null || val === null || !Number.isInteger(usesN) || usesN < 1) {
-      setFormError('Enter amounts in rupees and at least 1 use.')
-      return
-    }
-    if (template === 'pct_cap' && !(rateN > 0 && rateN <= 100)) {
-      setFormError('Percent must be between 1 and 100.')
-      return
-    }
-    setFormError(null)
-    const id = `${platform}-${offers.length + 1}`
-    setOffers([
-      ...offers,
-      {
-        id,
-        platform,
-        kind: template,
-        min_order_paise: min,
-        value_paise: template === 'flat' ? val : 0,
-        rate_bp: template === 'pct_cap' ? Math.round(rateN * 100) : 0,
-        cap_paise: template === 'pct_cap' ? val : null,
-        tiers: [],
-        uses_left: usesN,
-        stack_group: template === 'pct_cap' ? 'bank' : 'platform_coupon',
-        value_type: platform === 'amazon' ? 'amazon_pay' : 'cash',
-        multiplier_bp: null,
-        eligible_categories: null,
-      },
-    ])
-  }
-
-  const input = 'w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm'
-  return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-      <h2 className="text-sm font-bold uppercase tracking-wide text-slate-500">Offer wallet</h2>
-      <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
-        <label className="text-xs text-slate-500">
-          Platform
-          <select className={input} value={platform} onChange={(e) => setPlatform(e.target.value as Platform)}>
-            {PLATFORMS.map((p) => (
-              <option key={p} value={p}>
-                {PLATFORM_META[p].name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="text-xs text-slate-500">
-          Type
-          <select className={input} value={template} onChange={(e) => setTemplate(e.target.value as OfferTemplate)}>
-            <option value="flat">₹ off on min order</option>
-            <option value="pct_cap">% off up to a cap (bank)</option>
-          </select>
-        </label>
-        <label className="text-xs text-slate-500">
-          Min order (₹)
-          <input className={input} inputMode="decimal" value={minOrder} onChange={(e) => setMinOrder(e.target.value)} />
-        </label>
-        {template === 'pct_cap' && (
-          <label className="text-xs text-slate-500">
-            Percent
-            <input className={input} inputMode="decimal" value={rate} onChange={(e) => setRate(e.target.value)} />
-          </label>
-        )}
-        <label className="text-xs text-slate-500">
-          {template === 'flat' ? 'Cashback (₹)' : 'Cap (₹)'}
-          <input className={input} inputMode="decimal" value={value} onChange={(e) => setValue(e.target.value)} />
-        </label>
-        <label className="text-xs text-slate-500">
-          Uses left
-          <input className={input} inputMode="numeric" value={uses} onChange={(e) => setUses(e.target.value)} />
-        </label>
-      </div>
-      <button type="button" onClick={add} className="mt-2 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-bold text-white">
-        Add offer
-      </button>
-      {formError && <p className="mt-1 text-xs text-rose-600">{formError}</p>}
-      <ul className="mt-2 space-y-1 text-xs">
-        {offers.map((o) => (
-          <li key={o.id} className="flex items-center justify-between rounded-lg bg-amber-50 px-2 py-1.5">
-            <span>
-              <strong>{PLATFORM_META[o.platform].name}</strong>{' '}
-              {o.kind === 'flat'
-                ? `${formatINR(o.value_paise)} back on ${formatINR(o.min_order_paise)}+`
-                : `${o.rate_bp / 100}% up to ${formatINR(o.cap_paise ?? 0)} on ${formatINR(o.min_order_paise)}+`}{' '}
-              · {o.uses_left} use{o.uses_left === 1 ? '' : 's'}
-            </span>
-            <button type="button" aria-label="Remove offer" onClick={() => setOffers(offers.filter((x) => x !== o))} className="px-1 text-rose-500">
-              ✕
-            </button>
-          </li>
-        ))}
-      </ul>
-    </section>
-  )
-}
-
-function Results({ result }: { result: PlanSetOut }) {
+function Results({ result, onAccept, busy }: { result: PlanSetOut; onAccept: (label: string) => void; busy: boolean }) {
   const [active, setActive] = useState(0)
   const plan = result.plans[Math.min(active, result.plans.length - 1)]
   if (!plan) return null
@@ -393,6 +316,15 @@ function Results({ result }: { result: PlanSetOut }) {
         <OrderCard key={i} order={o} />
       ))}
 
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => onAccept(plan.label)}
+        className="w-full rounded-xl bg-slate-900 py-3 text-sm font-bold text-white disabled:opacity-40"
+      >
+        Use “{PLAN_LABELS[plan.label].title}”: create {plan.orders.length} basket{plan.orders.length === 1 ? '' : 's'}
+      </button>
+
       {plan.unpriced.length > 0 && (
         <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-800">
           No listing meets the delivery time for: {plan.unpriced.join(', ')}.
@@ -402,7 +334,7 @@ function Results({ result }: { result: PlanSetOut }) {
   )
 }
 
-function OrderCard({ order }: { order: OrderOut }) {
+export function OrderCard({ order }: { order: OrderOut }) {
   const meta = PLATFORM_META[order.platform]
   const pending = order.status === 'pending'
   return (
