@@ -911,3 +911,19 @@ def test_case_10_response_lines_contract() -> None:
                 assert line["line_total_paise"] == line["unit_price_paise"] * line["packs"]
                 if line["is_filler"]:
                     assert line["packs"] == 1
+
+
+def test_flexible_quantity_too_large_is_422_not_500() -> None:
+    from fastapi import FastAPI
+
+    from app.api.v1 import plans
+
+    app = FastAPI()
+    app.include_router(plans.router, prefix="/api/v1")
+    c = TestClient(app, raise_server_exceptions=False)
+    huge = "1" + "0" * 309 + "L"
+    for quantity in (huge, "101L", "100001g"):
+        body = {"needs": [{"line_id": "oil", "family_key": "sunflower_oil", "quantity": quantity}]}
+        assert c.post("/api/v1/plans", json=body).status_code == 422, quantity
+    ok = {"needs": [{"line_id": "oil", "family_key": "sunflower_oil", "quantity": "100L"}]}
+    assert c.post("/api/v1/plans", json=ok).status_code == 200

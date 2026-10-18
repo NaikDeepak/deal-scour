@@ -1,4 +1,3 @@
-import math
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
@@ -20,6 +19,9 @@ from app.pricing.landed import unit_price
 from app.pricing.units import parse_pack
 
 router = APIRouter()
+
+# Largest flexible quantity per need: 100 kg, 100 L, 1000 pieces.
+_MAX_QUANTITY = {"g": 100_000, "ml": 100_000, "pc": 1_000}
 
 _VALID_PLATFORMS: set[str] = {"amazon", "flipkart", "blinkit", "instamart", "zepto"}
 ALL_PLATFORMS: list[Platform] = ["amazon", "flipkart", "blinkit", "instamart", "zepto"]
@@ -306,6 +308,8 @@ def post_plans(req: PlansRequest) -> PlansResponse:
                     raise ValueError(f"Unknown family_key: {need.family_key}")
 
                 parsed_pack = parse_pack(need.quantity)
+                if parsed_pack.qty > _MAX_QUANTITY[parsed_pack.unit]:
+                    raise ValueError(f"Line {need.line_id}: quantity {need.quantity} is too large")
                 target = parsed_pack.qty * need.qty
 
                 family_listings = seed_by_family[need.family_key]
@@ -319,7 +323,7 @@ def post_plans(req: PlansRequest) -> PlansResponse:
 
                 candidates = []
                 for item in matching_listings:
-                    packs = math.ceil(target / item.pack.qty)
+                    packs = -(-target // item.pack.qty)  # integer ceil: no float overflow
                     line_packs[(need.line_id, item.id)] = packs
                     base_up = unit_price(item.item_price(), memberships[item.platform])
                     candidates.append(
