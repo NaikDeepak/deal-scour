@@ -28,6 +28,7 @@ Add new ADRs at the bottom and never rewrite an accepted one. Supersede it inste
 | 021 | AGENTS.md is canonical; CLAUDE.md imports it | Accepted |
 | 022 | Open source, BYOK: each deployment brings its own keys | Accepted |
 | 023 | Ship the heuristic first; defer CP-SAT until it's needed | Accepted (amends 006) |
+| 024 | Email-code sign-in hardening and the lockout trade-off | Accepted |
 
 ---
 
@@ -201,3 +202,19 @@ real plan where the heuristic is provably beaten; offer kinds 8–14 (multi-buy,
 or instances grow past ~60 lines.
 **Consequences.** No OR-Tools dependency for now. `evaluate_plan` remains the single scorer, so a future CP-SAT model can be
 cross-checked against it and the heuristic. The brute-force cross-checks stay in the test suite as a regression net.
+
+### ADR-024 · Email-code sign-in hardening and the lockout trade-off
+*2026-10-18 · Accepted · details ADR-013*
+**Context.** A 6-digit code has 10⁶ values. Without an email-wide limit, rotating codes allowed ~25 guesses/hour indefinitely (≈20%/year to
+crack). Reviews (lead + codex) also found races on owner bootstrap, invite redemption and attempt counting.
+**Decision.**
+- Per code: 5 attempts, **reserved atomically** (guarded `UPDATE … WHERE attempts < 5`) before comparing. A correct code returns its attempt.
+- Per email: at most **10 failed attempts per 24 h** across all codes. Beyond that, verify fails and no new codes are sent. At most 5 codes/hour.
+- Codes and tokens are stored only as HMAC/SHA-256. Comparison uses `compare_digest`. `request-code` always answers 202 with uniform work and email is sent in the background.
+- One owner per household (partial unique index). Invites are claimed atomically before the user row is created.
+- CSRF header on **every** mutating route (router-wide), and a test walks the OpenAPI paths to prove it. `SameSite=Lax`, HttpOnly cookies.
+- `DEALSCOUR_SECRET_KEY` is mandatory (≥ 32 chars). Dev login prints codes and is refused unless the base URL is localhost.
+**Consequences / accepted risk.** Someone who knows a family member's email can **lock them out for up to 24 h** by spending the
+failed-attempt budget. At personal scale that's an annoyance, not a breach. Mitigation later: per-IP throttling (needs trusted proxy headers
+from Caddy) and an owner-side "unlock" action.
+

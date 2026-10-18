@@ -136,8 +136,24 @@ export interface PlanSetOut {
   plans: LabelledPlanOut[]
 }
 
+export class UnauthorizedError extends Error {}
+
+// Called on any 401 so the app can drop back to the sign-in screen.
+let onUnauthorized: () => void = () => {}
+export function setUnauthorizedHandler(fn: () => void) {
+  onUnauthorized = fn
+}
+
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...init })
+  const method = (init?.method ?? 'GET').toUpperCase()
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  // CSRF: the API rejects state-changing requests without this header (cross-site forms can't send it).
+  if (method !== 'GET') headers['X-DealScour'] = '1'
+  const res = await fetch(path, { credentials: 'same-origin', ...init, headers })
+  if (res.status === 401) {
+    onUnauthorized()
+    throw new UnauthorizedError('Please sign in')
+  }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
     const detail = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail ?? body)
@@ -259,4 +275,31 @@ export const api = {
   ledger: () => call<Ledger>('/api/v1/ledger/summary'),
 
   observePrice: (p: PriceIn) => call<unknown>('/api/v1/prices', json(p)),
+}
+
+// ---- Auth and household (backend/app/api/v1/{auth,households}.py) ----
+
+export interface Me {
+  user: { id: number; email: string; name: string | null }
+  household_id: number
+  role: 'owner' | 'member'
+}
+
+export interface Member {
+  user_id: number
+  email: string
+  name: string | null
+  role: 'owner' | 'member'
+}
+
+export const auth = {
+  me: () => call<Me>('/api/v1/auth/me'),
+  requestCode: (email: string, inviteCode: string | null) =>
+    call<{ sent: boolean }>('/api/v1/auth/request-code', json({ email, invite_code: inviteCode })),
+  verify: (email: string, code: string, inviteCode: string | null, name: string | null) =>
+    call<Me>('/api/v1/auth/verify', json({ email, code, invite_code: inviteCode, name })),
+  logout: () => call<unknown>('/api/v1/auth/logout', { method: 'POST' }),
+  members: () => call<Member[]>('/api/v1/households/members'),
+  invite: () => call<{ invite_code: string; expires_at: string }>('/api/v1/households/invites', { method: 'POST' }),
+  removeMember: (userId: number) => call<unknown>(`/api/v1/households/members/${userId}`, { method: 'DELETE' }),
 }
