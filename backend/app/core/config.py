@@ -27,6 +27,8 @@ class Settings:
     quiet_hours_start: int = 23
     quiet_hours_end: int = 7
     daily_alert_cap: int = 10
+    radar_max_post_age_hours: int = 6
+    radar_max_page_fetches_per_day: int = 40
 
     @property
     def db_url(self) -> str:
@@ -109,6 +111,18 @@ class Settings:
         except ValueError:
             daily_alert_cap = 10
 
+        max_age_raw = os.environ.get("DEALSCOUR_RADAR_MAX_POST_AGE_HOURS", "6")
+        try:
+            radar_max_post_age_hours = max(1, int(max_age_raw))
+        except ValueError:
+            radar_max_post_age_hours = 6
+
+        page_budget_raw = os.environ.get("DEALSCOUR_RADAR_MAX_PAGE_FETCHES_PER_DAY", "40")
+        try:
+            radar_max_page_fetches_per_day = max(0, int(page_budget_raw))
+        except ValueError:
+            radar_max_page_fetches_per_day = 40
+
         static = os.environ.get("DEALSCOUR_STATIC_DIR")
         return cls(
             db_path=db_path_from_env(),
@@ -132,6 +146,8 @@ class Settings:
             quiet_hours_start=quiet_hours_start,
             quiet_hours_end=quiet_hours_end,
             daily_alert_cap=daily_alert_cap,
+            radar_max_post_age_hours=radar_max_post_age_hours,
+            radar_max_page_fetches_per_day=radar_max_page_fetches_per_day,
         )
 
 

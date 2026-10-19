@@ -1,21 +1,22 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
+import manifest from '../../extension/manifest.json'
 import { ExtensionBadge } from './App'
 import { EXPECTED_EXTENSION_VERSION } from './lib/extension'
 
 describe('Case 18: Extension version badge in App header', () => {
-  it('exports EXPECTED_EXTENSION_VERSION 0.3.0 from extension/manifest.json', () => {
-    expect(EXPECTED_EXTENSION_VERSION).toBe('0.3.0')
+  it('exports EXPECTED_EXTENSION_VERSION from extension/manifest.json', () => {
+    expect(EXPECTED_EXTENSION_VERSION).toBe(manifest.version)
   })
 
   it('renders green matching badge when extension version matches EXPECTED_EXTENSION_VERSION', () => {
     const html = renderToStaticMarkup(
       createElement(ExtensionBadge, {
-        state: { kind: 'loaded', version: '0.3.0' },
+        state: { kind: 'loaded', version: EXPECTED_EXTENSION_VERSION },
       }),
     )
-    expect(html).toContain('Extension 0.3.0 ✓')
+    expect(html).toContain(`Extension ${EXPECTED_EXTENSION_VERSION} ✓`)
     expect(html).toContain('bg-emerald-100')
     expect(html).toContain('text-emerald-800')
   })
@@ -26,7 +27,7 @@ describe('Case 18: Extension version badge in App header', () => {
         state: { kind: 'loaded', version: '0.2.0' },
       }),
     )
-    expect(html).toContain('Reload the extension: 0.2.0 loaded, 0.3.0 available')
+    expect(html).toContain(`Reload the extension: 0.2.0 loaded, ${EXPECTED_EXTENSION_VERSION} available`)
     expect(html).toContain('chrome://extensions')
     expect(html).toContain('bg-amber-100')
     expect(html).toContain('text-amber-800')

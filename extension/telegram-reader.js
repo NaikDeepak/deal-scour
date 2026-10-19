@@ -14,6 +14,22 @@ function normalizePeer(raw) {
   return s;
 }
 
+const SEND_BATCH_SIZE = 50;
+
+function getSeenSet(root) {
+  let seen = seenByRoot.get(root);
+  if (!seen) {
+    seen = new Set();
+    seenByRoot.set(root, seen);
+  }
+  return seen;
+}
+
+// Telegram message ids are increasing integers; anything else can't be ordered and is never filtered.
+function numericMessageId(id) {
+  return /^\d+$/.test(String(id)) ? Number(id) : null;
+}
+
 function getActivePeerId(rootOrDoc) {
   if (!rootOrDoc || typeof rootOrDoc !== 'object') return '';
   if (typeof rootOrDoc.peerId === 'string') return normalizePeer(rootOrDoc.peerId);
@@ -63,7 +79,7 @@ function extractLinksFromNode(node, text) {
   return links;
 }
 
-function extractChannelPosts(rootOrDoc, allowedPeers, explicitSeenSet) {
+function extractChannelPosts(rootOrDoc, allowedPeers, explicitSeenSet, lastSentByPeer) {
   if (!rootOrDoc || !Array.isArray(allowedPeers) || allowedPeers.length === 0) {
     return [];
   }
@@ -78,14 +94,11 @@ function extractChannelPosts(rootOrDoc, allowedPeers, explicitSeenSet) {
     return [];
   }
 
-  let seen = explicitSeenSet;
-  if (!seen) {
-    seen = seenByRoot.get(rootOrDoc);
-    if (!seen) {
-      seen = new Set();
-      seenByRoot.set(rootOrDoc, seen);
-    }
-  }
+  const seen = explicitSeenSet || getSeenSet(rootOrDoc);
+  const storedLastId =
+    lastSentByPeer && typeof lastSentByPeer === 'object' ? lastSentByPeer[activePeer] : null;
+  const lastSentId =
+    storedLastId === null || storedLastId === undefined ? null : numericMessageId(storedLastId);
 
   let rawNodes = [];
   if (Array.isArray(rootOrDoc.messages)) {
@@ -123,6 +136,10 @@ function extractChannelPosts(rootOrDoc, allowedPeers, explicitSeenSet) {
 
     const dedupeKey = `${activePeer}:${messageId}`;
     if (seen.has(dedupeKey)) continue;
+
+    // Ignore the backlog: after a reload only messages newer than the last one we sent are read.
+    const numericId = numericMessageId(messageId);
+    if (numericId !== null && lastSentId !== null && numericId <= lastSentId) continue;
 
     let rawText = '';
     if (typeof node.text === 'string') {
@@ -164,9 +181,17 @@ async function runReaderTick(rootOrDoc, deps = {}) {
     deps.getStorage ||
     (async () => {
       if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-        return chrome.storage.local.get(['radarAllowedPeers']);
+        return chrome.storage.local.get(['radarAllowedPeers', 'radarLastSentIds']);
       }
       return {};
+    });
+
+  const setStorage =
+    deps.setStorage ||
+    (async (values) => {
+      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+        await chrome.storage.local.set(values);
+      }
     });
 
   const sendMessage =
@@ -183,13 +208,50 @@ async function runReaderTick(rootOrDoc, deps = {}) {
   if (allowedPeers.length === 0) {
     return [];
   }
+  const lastSentIds =
+    data && data.radarLastSentIds && typeof data.radarLastSentIds === 'object'
+      ? data.radarLastSentIds
+      : {};
 
-  const newPosts = extractChannelPosts(rootOrDoc, allowedPeers);
-  if (newPosts.length > 0) {
-    await sendMessage({
-      type: 'DEALSCOUR_RADAR_POSTS',
-      posts: newPosts.slice(0, 50),
-    });
+  const seen = getSeenSet(rootOrDoc);
+  const newPosts = extractChannelPosts(rootOrDoc, allowedPeers, seen, lastSentIds);
+  if (newPosts.length === 0) {
+    return newPosts;
+  }
+
+  // Send oldest first so the remembered "last sent id" never skips a post that failed to send.
+  const ordered = newPosts.slice().sort((a, b) => {
+    const x = numericMessageId(a.message_id);
+    const y = numericMessageId(b.message_id);
+    return x !== null && y !== null ? x - y : 0;
+  });
+
+  const peer = ordered[0].peer_id;
+  let newestSent = null;
+  for (let i = 0; i < ordered.length; i += SEND_BATCH_SIZE) {
+    const batch = ordered.slice(i, i + SEND_BATCH_SIZE);
+    let reply = null;
+    try {
+      reply = await sendMessage({ type: 'DEALSCOUR_RADAR_POSTS', posts: batch });
+    } catch {
+      reply = null;
+    }
+    if (!reply || reply.ok !== true) {
+      // Not delivered: forget these posts so the next tick retries them.
+      for (const post of ordered.slice(i)) {
+        seen.delete(`${post.peer_id}:${post.message_id}`);
+      }
+      break;
+    }
+    for (const post of batch) {
+      const id = numericMessageId(post.message_id);
+      if (id !== null && (newestSent === null || id > newestSent)) newestSent = id;
+    }
+  }
+
+  const previous = numericMessageId(lastSentIds[peer] ?? '');
+  if (newestSent !== null && (previous === null || newestSent > previous)) {
+    await setStorage({ radarLastSentIds: { ...lastSentIds, [peer]: newestSent } });
   }
   return newPosts;
 }

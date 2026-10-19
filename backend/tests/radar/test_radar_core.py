@@ -1,3 +1,4 @@
+import threading
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -18,6 +19,7 @@ from app.radar.verdict import (
     LivePage,
     TrackedContext,
     decide_verdict,
+    url_slug_words,
 )
 
 FIXED_NOW = datetime(2026, 10, 19, 12, 0, 0, tzinfo=UTC)
@@ -532,3 +534,138 @@ def test_case_6_alerts_dedupe_quiet_hours_daily_cap_and_secret_safety(
 
     # 6f. Token never in caplog
     assert secret_bot_token not in caplog.text
+
+
+# Item 20: relevance gate uses the post text AND the words of the resolved URL slug.
+def test_url_slug_words_extracts_product_words_only() -> None:
+    assert url_slug_words("https://www.amazon.in/Tata-Sampann-Almonds-500g/dp/B0ABCDE123?tag=x") == (
+        "Tata Sampann Almonds 500g"
+    )
+    assert url_slug_words(
+        "https://www.flipkart.com/happilo-premium-almonds/p/itm123456789?pid=ABC"
+    ) == ("happilo premium almonds")
+    assert url_slug_words("https://www.amazon.in/dp/B0ABCDE123") == ""
+    assert url_slug_words(None) == ""
+
+
+def test_case_23_gate_uses_resolved_url_slug_even_when_post_text_has_no_product_words() -> None:
+    family_rates = {
+        "almonds": FamilyRate(
+            family_key="almonds", category="staples", best_unit_rate_paise=120000, unit="g"
+        ),
+    }
+    fetch_calls = 0
+
+    def fetch() -> LivePage:
+        nonlocal fetch_calls
+        fetch_calls += 1
+        return LivePage(
+            listed_paise=39900, in_stock=True, title="Happilo Premium Almonds 500g"
+        )
+
+    common: dict[str, Any] = {
+        "post_text": "Loot ₹99 : https://amzn.to/x",
+        "posted_paise": 9900,
+        "platform": "amazon",
+        "tracked": None,
+        "keywords": {"almonds"},
+        "tracked_families": {"almonds"},
+        "family_best_rates": family_rates,
+        "fetch_page": fetch,
+    }
+
+    luggage = decide_verdict(
+        sku="B0LUGGAGE1",
+        final_url="https://www.amazon.in/American-Tourister-Luggage/dp/B0LUGGAGE1",
+        **common,
+    )
+    assert luggage.verdict == "not_relevant"
+    assert fetch_calls == 0
+
+    # No product words anywhere (text or slug) -> still no fetch.
+    bare = decide_verdict(sku="B0BARE0001", final_url="https://www.amazon.in/dp/B0BARE0001", **common)
+    assert bare.verdict == "not_relevant"
+    assert fetch_calls == 0
+
+    almonds = decide_verdict(
+        sku="B0ALMONDS1",
+        final_url="https://www.amazon.in/Happilo-Almonds-500g/dp/B0ALMONDS1",
+        **common,
+    )
+    assert fetch_calls == 1
+    assert almonds.verdict != "skipped_budget"
+
+
+def test_case_23_untracked_budget_spent_is_skipped_budget_without_fetch() -> None:
+    fetch_calls = 0
+
+    def fetch() -> LivePage:
+        nonlocal fetch_calls
+        fetch_calls += 1
+        return LivePage(listed_paise=39900, in_stock=True, title="Happilo Almonds 500g")
+
+    outcome = decide_verdict(
+        post_text="Almonds ₹399 : https://amzn.to/x",
+        posted_paise=39900,
+        platform="amazon",
+        sku="B0ALMONDS1",
+        tracked=None,
+        keywords={"almonds"},
+        tracked_families=set(),
+        family_best_rates={},
+        fetch_page=fetch,
+        final_url="https://www.amazon.in/Happilo-Almonds-500g/dp/B0ALMONDS1",
+        untracked_fetch_allowed=False,
+    )
+    assert outcome.verdict == "skipped_budget"
+    assert outcome.reasons == ["skipped_budget"]
+    assert fetch_calls == 0
+
+
+# Item 20 / 22: ResolvedLink keeps the final hop URL; the resolver is safe to share across threads.
+def test_resolved_link_keeps_final_url_for_direct_and_short_links() -> None:
+    final = "https://www.amazon.in/Happilo-Almonds-500g/dp/B0ALMONDS1?tag=offerbox-21"
+
+    def fake_http(url: str, max_bytes: int) -> tuple[int, dict[str, str], bytes]:
+        return 302, {"location": final}, b""
+
+    resolver = LinkResolver(http_fetch=fake_http, now=lambda: FIXED_NOW, sleep=lambda s: None)
+
+    short = resolver.resolve("https://amzn.to/x")
+    assert short.status == "ok"
+    assert short.final_url == final
+
+    direct = resolver.resolve("https://www.amazon.in/Tata-Dal-1kg/dp/B072HG4WNC?tag=a")
+    assert direct.final_url == "https://www.amazon.in/Tata-Dal-1kg/dp/B072HG4WNC?tag=a"
+
+
+def test_link_resolver_is_thread_safe() -> None:
+    assert isinstance(LinkResolver()._lock, type(threading.Lock()))
+
+    fetch_calls: list[str] = []
+
+    def slow_http(url: str, max_bytes: int) -> tuple[int, dict[str, str], bytes]:
+        fetch_calls.append(url)
+        return 302, {"location": "https://www.amazon.in/dp/B072HG4WNC"}, b""
+
+    resolver = LinkResolver(http_fetch=slow_http, now=lambda: FIXED_NOW, sleep=lambda s: None)
+    errors: list[BaseException] = []
+
+    def worker(i: int) -> None:
+        try:
+            for j in range(10):
+                res = resolver.resolve(f"https://amzn.to/t{i}-{j}")
+                assert res.status == "ok"
+        except BaseException as exc:  # noqa: BLE001 - surfaced below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert errors == []
+    # Every distinct short link was fetched exactly once and recorded for politeness.
+    assert len(fetch_calls) == 80
+    assert len(resolver._recent_resolutions) == 80

@@ -427,6 +427,8 @@ def test_migration_0009_upgrade_preserves_data(tmp_path: Path) -> None:
         "radar_extension_token",
     }
     assert radar_tables.issubset(set(inspector.get_table_names()))
+    radar_post_columns = {c["name"] for c in inspector.get_columns("radar_post")}
+    assert {"status", "pairs_json", "page_fetches", "processed_at"} <= radar_post_columns
 
     with Session(engine2) as session:
         shopping_list_table = SQLModel.metadata.tables["shopping_list"]

@@ -694,9 +694,6 @@ function handleRuntimeMessage(message, sender, sendResponse) {
           return;
         }
         const data = await resp.json();
-        if (data && data.alerts_created > 0) {
-          await pollRadarAlerts();
-        }
         sendResponse({ ok: true, ...data });
       } catch (err) {
         sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) });

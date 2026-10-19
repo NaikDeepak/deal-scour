@@ -65,6 +65,10 @@ def upgrade() -> None:
         sa.Column("family_key", sqlmodel.sql.sqltypes.AutoString(), nullable=True),
         sa.Column("posted_paise", sa.Integer(), nullable=True),
         sa.Column("live_paise", sa.Integer(), nullable=True),
+        sa.Column("status", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
+        sa.Column("pairs_json", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
+        sa.Column("page_fetches", sa.Integer(), nullable=False),
+        sa.Column("processed_at", sa.DateTime(), nullable=True),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.ForeignKeyConstraint(["household_id"], ["household.id"]),
         sa.PrimaryKeyConstraint("id"),
@@ -73,6 +77,7 @@ def upgrade() -> None:
     op.create_index("ix_radar_post_household_id", "radar_post", ["household_id"], unique=False)
     op.create_index("ix_radar_post_peer_id", "radar_post", ["peer_id"], unique=False)
     op.create_index("ix_radar_post_verdict", "radar_post", ["verdict"], unique=False)
+    op.create_index("ix_radar_post_status", "radar_post", ["status"], unique=False)
     op.create_index("ix_radar_post_created_at", "radar_post", ["created_at"], unique=False)
 
     op.create_table(
@@ -133,6 +138,7 @@ def downgrade() -> None:
     op.drop_table("radar_alert")
 
     op.drop_index("ix_radar_post_created_at", table_name="radar_post")
+    op.drop_index("ix_radar_post_status", table_name="radar_post")
     op.drop_index("ix_radar_post_verdict", table_name="radar_post")
     op.drop_index("ix_radar_post_peer_id", table_name="radar_post")
     op.drop_index("ix_radar_post_household_id", table_name="radar_post")

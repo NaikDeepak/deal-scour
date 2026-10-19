@@ -1,3 +1,4 @@
+import json
 import re
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
@@ -173,4 +174,25 @@ def parse_post(text: str, extra_links: list[str] | None = None) -> list[PriceLin
             if p_val is not None and link_tok:
                 pairs.append(PriceLinkPair(price_paise=p_val, url=link_tok))
 
+    return pairs
+
+
+def pairs_to_json(pairs: list[PriceLinkPair]) -> str:
+    """Serialize parsed pairs so ingest can store them and the background job can resolve them later."""
+    return json.dumps([{"price_paise": p.price_paise, "url": p.url} for p in pairs])
+
+
+def pairs_from_json(raw: str) -> list[PriceLinkPair]:
+    try:
+        data = json.loads(raw or "[]")
+    except ValueError:
+        return []
+    pairs: list[PriceLinkPair] = []
+    if not isinstance(data, list):
+        return pairs
+    for entry in data:
+        if not isinstance(entry, dict) or not isinstance(entry.get("url"), str):
+            continue
+        price = entry.get("price_paise")
+        pairs.append(PriceLinkPair(price_paise=price if isinstance(price, int) else None, url=entry["url"]))
     return pairs

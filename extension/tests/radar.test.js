@@ -252,11 +252,11 @@ describe('Case 8 & 11: service-worker.js radar sender checks and notification cl
 });
 
 describe('Case 18: visible extension version in manifest, portal-bridge, and options', () => {
-  it('reports chrome.runtime.getManifest().version (0.3.0) with no hard-coded 0.1.0 and shows v0.3.0 in options', async () => {
+  it('reports chrome.runtime.getManifest().version (0.3.1) with no hard-coded 0.1.0 and shows it in options', async () => {
     const fs = require('node:fs');
     const path = require('node:path');
     const manifest = require('../manifest.json');
-    assert.equal(manifest.version, '0.3.0');
+    assert.equal(manifest.version, '0.3.1');
 
     const bridgePath = path.join(__dirname, '..', 'portal-bridge.js');
     const bridgeSrc = fs.readFileSync(bridgePath, 'utf8');
@@ -312,7 +312,7 @@ describe('Case 18: visible extension version in manifest, portal-bridge, and opt
     assert.equal(postedMessages.length, 1);
     assert.deepEqual(postedMessages[0].msg, {
       type: 'DEALSCOUR_EXTENSION_READY',
-      version: '0.3.0',
+      version: manifest.version,
     });
 
     // Also responds with manifest version when pinged
@@ -324,14 +324,103 @@ describe('Case 18: visible extension version in manifest, portal-bridge, and opt
     assert.equal(postedMessages.length, 2);
     assert.deepEqual(postedMessages[1].msg, {
       type: 'DEALSCOUR_EXTENSION_READY',
-      version: '0.3.0',
+      version: manifest.version,
     });
 
-    // Options page shows "DealScour extension v0.3.0"
+    // Options page shows "DealScour extension v<manifest version>"
     delete require.cache[require.resolve('../options.js')];
     const { loadOptions } = require('../options.js');
     await loadOptions();
-    assert.equal(elements['ext-version'].textContent, 'DealScour extension v0.3.0');
+    assert.equal(elements['ext-version'].textContent, `DealScour extension v${manifest.version}`);
   });
 });
 
+
+// Item 21 / 23: after a reload the reader only sends messages newer than the per-peer last sent id.
+describe('Case 23: ignore the backlog after an extension reload', () => {
+  const PEER = '-1001191090845';
+  const makeDom = (ids) => ({
+    peerId: PEER,
+    messages: ids.map((id) => ({
+      id: String(id),
+      text: `Loot ₹99 : https://amzn.to/m${id}`,
+      links: [`https://amzn.to/m${id}`],
+      posted_at: '2026-10-19T10:00:00Z',
+    })),
+  });
+  const makeDeps = (storage, sent, reply = { ok: true }) => ({
+    getStorage: async () => ({ ...storage }),
+    setStorage: async (values) => {
+      Object.assign(storage, values);
+    },
+    sendMessage: async (msg) => {
+      sent.push(msg);
+      return reply;
+    },
+  });
+
+  it('stored last id 120, posts 118-121 -> only 121 is sent and remembered', async () => {
+    const storage = { radarAllowedPeers: [PEER], radarLastSentIds: { [PEER]: 120 } };
+    const sent = [];
+    const dom = makeDom([118, 119, 120, 121]);
+
+    const posts = await runReaderTick(dom, makeDeps(storage, sent));
+
+    assert.deepEqual(
+      posts.map((p) => p.message_id),
+      ['121']
+    );
+    assert.equal(sent.length, 1);
+    assert.deepEqual(
+      sent[0].posts.map((p) => p.message_id),
+      ['121']
+    );
+    assert.equal(storage.radarLastSentIds[PEER], 121);
+
+    // Same DOM again (or a reload with the stored id) -> nothing more is sent.
+    await runReaderTick(dom, makeDeps(storage, sent));
+    await runReaderTick(makeDom([118, 119, 120, 121]), makeDeps(storage, sent));
+    assert.equal(sent.length, 1);
+  });
+
+  it('keeps the last id per peer and never moves it backwards', async () => {
+    const other = '-1002222222222';
+    const storage = {
+      radarAllowedPeers: [PEER, other],
+      radarLastSentIds: { [PEER]: 200, [other]: 5 },
+    };
+    const sent = [];
+
+    await runReaderTick(makeDom([150, 201]), makeDeps(storage, sent));
+
+    assert.equal(storage.radarLastSentIds[PEER], 201);
+    assert.equal(storage.radarLastSentIds[other], 5);
+    assert.deepEqual(
+      sent[0].posts.map((p) => p.message_id),
+      ['201']
+    );
+  });
+
+  it('does not advance the last id (and retries) when the worker reports a failure', async () => {
+    const storage = { radarAllowedPeers: [PEER], radarLastSentIds: { [PEER]: 120 } };
+    const sent = [];
+    const dom = makeDom([121]);
+
+    await runReaderTick(dom, makeDeps(storage, sent, { ok: false, status: 503 }));
+    assert.equal(storage.radarLastSentIds[PEER], 120);
+
+    await runReaderTick(dom, makeDeps(storage, sent, { ok: true }));
+    assert.equal(sent.length, 2);
+    assert.equal(storage.radarLastSentIds[PEER], 121);
+  });
+
+  it('first run without a stored id sends everything it sees and remembers the newest', async () => {
+    const storage = { radarAllowedPeers: [PEER] };
+    const sent = [];
+
+    await runReaderTick(makeDom([7, 9, 8]), makeDeps(storage, sent));
+
+    assert.equal(sent[0].posts.length, 3);
+    assert.equal(storage.radarLastSentIds[PEER], 9);
+  });
+});

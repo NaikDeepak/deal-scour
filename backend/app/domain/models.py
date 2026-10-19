@@ -384,7 +384,7 @@ class RadarPost(SQLModel, table=True):
     posted_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC)
     )
-    verdict: str = Field(default="not_relevant", index=True)
+    verdict: str = Field(default="pending", index=True)
     reasons_json: str = Field(default="[]")
     platform: str | None = Field(default=None)
     sku: str | None = Field(default=None)
@@ -395,6 +395,11 @@ class RadarPost(SQLModel, table=True):
     family_key: str | None = Field(default=None)
     posted_paise: int | None = Field(default=None)
     live_paise: int | None = Field(default=None)
+    # pending -> done | too_old. Ingest only stores; app.radar.process fills in the verdict.
+    status: str = Field(default="pending", index=True)
+    pairs_json: str = Field(default="[]")  # parsed (price, link) pairs, resolved later
+    page_fetches: int = Field(default=0)  # untracked page fetches this post used (daily budget)
+    processed_at: datetime | None = Field(default=None)
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         index=True,

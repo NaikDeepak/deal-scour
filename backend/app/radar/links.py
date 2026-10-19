@@ -1,4 +1,5 @@
 import re
+import threading
 import time
 from collections import deque
 from collections.abc import Callable
@@ -49,6 +50,9 @@ class ResolvedLink:
     status: Literal["ok", "unsupported", "rate_limited"]
     ref: ProductRef | None = None
     reason: str = "ok"
+    # Last hop URL before canonicalisation. Its path slug names the product ("/Tata-Sampann-Almonds-500g/dp/…"),
+    # which the relevance gate reads before any page is fetched.
+    final_url: str | None = None
 
 
 def _is_short_link(url: str) -> bool:
@@ -147,6 +151,8 @@ def _default_http_fetch(url: str, max_bytes: int) -> tuple[int, dict[str, str], 
 
 
 class LinkResolver:
+    """Resolves allow-listed short links. Safe to share across threads (the radar loop and requests)."""
+
     def __init__(
         self,
         *,
@@ -157,28 +163,46 @@ class LinkResolver:
         self._http_fetch = http_fetch
         self._now = now
         self._sleep = sleep
+        self._lock = threading.Lock()
         self._cache: dict[str, tuple[ResolvedLink, datetime]] = {}
         self._recent_resolutions: deque[datetime] = deque()
         self._last_resolution_at: datetime | None = None
 
     def _enforce_politeness(self) -> bool:
-        now_dt = to_utc(self._now())
-        one_hour_ago = now_dt - timedelta(hours=1)
-        while self._recent_resolutions and self._recent_resolutions[0] <= one_hour_ago:
-            self._recent_resolutions.popleft()
+        # Held while sleeping on purpose: concurrent callers queue up, which is what "≤ 1 per 2 s" means.
+        with self._lock:
+            now_dt = to_utc(self._now())
+            one_hour_ago = now_dt - timedelta(hours=1)
+            while self._recent_resolutions and self._recent_resolutions[0] <= one_hour_ago:
+                self._recent_resolutions.popleft()
 
-        if len(self._recent_resolutions) >= MAX_RESOLUTIONS_PER_HOUR:
-            return False
+            if len(self._recent_resolutions) >= MAX_RESOLUTIONS_PER_HOUR:
+                return False
 
-        if self._last_resolution_at is not None:
-            elapsed = (now_dt - self._last_resolution_at).total_seconds()
-            if elapsed < MIN_RESOLUTION_GAP_SECONDS:
-                self._sleep(MIN_RESOLUTION_GAP_SECONDS - elapsed)
-                now_dt = to_utc(self._now())
+            if self._last_resolution_at is not None:
+                elapsed = (now_dt - self._last_resolution_at).total_seconds()
+                if elapsed < MIN_RESOLUTION_GAP_SECONDS:
+                    self._sleep(MIN_RESOLUTION_GAP_SECONDS - elapsed)
+                    now_dt = to_utc(self._now())
 
-        self._last_resolution_at = now_dt
-        self._recent_resolutions.append(now_dt)
-        return True
+            self._last_resolution_at = now_dt
+            self._recent_resolutions.append(now_dt)
+            return True
+
+    def _cached(self, url: str) -> ResolvedLink | None:
+        with self._lock:
+            cached = self._cache.get(url)
+            if cached is None:
+                return None
+            cached_res, cached_at = cached
+            if (to_utc(self._now()) - to_utc(cached_at)) < timedelta(days=CACHE_TTL_DAYS):
+                return cached_res
+            return None
+
+    def _remember(self, url: str, res: ResolvedLink) -> ResolvedLink:
+        with self._lock:
+            self._cache[url] = (res, to_utc(self._now()))
+        return res
 
     def resolve(self, raw_url: str) -> ResolvedLink:
         url = (raw_url or "").strip()
@@ -188,34 +212,31 @@ class LinkResolver:
         # 1. Check if it is already a direct Amazon/Flipkart product URL
         direct = _try_parse_direct_product(url)
         if direct is not None:
-            return ResolvedLink(status="ok", ref=direct, reason="ok")
+            return ResolvedLink(status="ok", ref=direct, reason="ok", final_url=url)
 
         # 2. Otherwise it must be on the short-link allow-list
         if not _is_short_link(url):
             return ResolvedLink(status="unsupported", ref=None, reason="unsupported_link")
 
-        now_dt = to_utc(self._now())
-        cached = self._cache.get(url)
+        cached = self._cached(url)
         if cached is not None:
-            cached_res, cached_at = cached
-            if (now_dt - to_utc(cached_at)) < timedelta(days=CACHE_TTL_DAYS):
-                return cached_res
+            return cached
 
         if not self._enforce_politeness():
             return ResolvedLink(status="rate_limited", ref=None, reason="unsupported_link")
 
+        unsupported = ResolvedLink(status="unsupported", ref=None, reason="unsupported_link")
         current_url = url
         for hop in range(MAX_HOPS + 1):
             if not _is_allowed_hop_url(current_url):
-                res = ResolvedLink(status="unsupported", ref=None, reason="unsupported_link")
-                self._cache[url] = (res, to_utc(self._now()))
-                return res
+                return self._remember(url, unsupported)
 
             parsed_ref = _try_parse_direct_product(current_url)
             if parsed_ref is not None:
-                res = ResolvedLink(status="ok", ref=parsed_ref, reason="ok")
-                self._cache[url] = (res, to_utc(self._now()))
-                return res
+                return self._remember(
+                    url,
+                    ResolvedLink(status="ok", ref=parsed_ref, reason="ok", final_url=current_url),
+                )
 
             if hop == MAX_HOPS:
                 break
@@ -223,8 +244,7 @@ class LinkResolver:
             try:
                 status_code, headers, _body = self._http_fetch(current_url, MAX_SHORT_BODY_BYTES)
             except Exception:
-                res = ResolvedLink(status="unsupported", ref=None, reason="unsupported_link")
-                return res
+                return unsupported
 
             location = headers.get("location") or headers.get("Location")
             if status_code in (301, 302, 303, 307, 308) and location:
@@ -232,9 +252,7 @@ class LinkResolver:
                 continue
             break
 
-        res = ResolvedLink(status="unsupported", ref=None, reason="unsupported_link")
-        self._cache[url] = (res, to_utc(self._now()))
-        return res
+        return self._remember(url, unsupported)
 
 
 _DEFAULT_RESOLVER = LinkResolver()

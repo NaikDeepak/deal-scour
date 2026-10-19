@@ -1,3 +1,5 @@
+import json
+import time
 from collections.abc import Generator
 from datetime import UTC, datetime, timedelta
 
@@ -5,9 +7,9 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.engine import Engine
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
-from app.api.v1.radar import get_notifier, get_page_fetcher, get_resolver
+from app.api.v1.radar import get_notifier
 from app.api.v1.radar import router as radar_router
 from app.core import clock
 from app.core.db import get_session
@@ -20,12 +22,15 @@ from app.domain.models import (
     HouseholdMember,
     ListingWatch,
     PriceObservation,
+    RadarAlert,
     RadarChannel,
     RadarKeyword,
     RadarPost,
 )
 from app.notify.base import AlertPayload
+from app.radar import process as radar_process
 from app.radar.links import LinkResolver, ResolvedLink
+from app.radar.process import process_pending_posts
 from app.radar.verdict import LivePage
 from app.sources.urls import ProductRef
 
@@ -40,6 +45,60 @@ class FakeNotifier:
     def send_alert(self, alert: AlertPayload) -> bool:
         self.sent.append(alert)
         return True
+
+
+def _amazon(slug: str, sku: str) -> ResolvedLink:
+    return ResolvedLink(
+        status="ok",
+        ref=ProductRef(platform="amazon", sku=sku, url=f"https://www.amazon.in/dp/{sku}"),
+        final_url=f"https://www.amazon.in/{slug}/dp/{sku}?tag=offerbox-21",
+    )
+
+
+class FakeResolver:
+    def resolve(self, raw_url: str) -> ResolvedLink:
+        if "amzn.to/butter" in raw_url:
+            return _amazon("Amul-Butter-500g", "B0BUTTER01")
+        if "amzn.to/expired" in raw_url:
+            return _amazon("Optimum-Nutrition-Whey-Protein-1kg", "B0EXPIRED1")
+        return ResolvedLink(status="unsupported", ref=None, reason="unsupported_link")
+
+
+def fake_page_fetch(platform: str, url: str) -> LivePage:
+    if "B0BUTTER01" in url:
+        return LivePage(listed_paise=29000, mrp_paise=32000, in_stock=True, title="Amul Butter 500g")
+    if "B0EXPIRED1" in url:
+        return LivePage(
+            listed_paise=299900,
+            mrp_paise=329900,
+            in_stock=True,
+            title="Optimum Nutrition Whey Protein 1kg",
+        )
+    raise AssertionError(f"Unexpected page fetch for {url}")
+
+
+class _NetworkSpy:
+    def __init__(self) -> None:
+        self.resolver_calls: list[str] = []
+        self.page_calls: list[tuple[str, str]] = []
+
+
+@pytest.fixture
+def network(monkeypatch: pytest.MonkeyPatch) -> _NetworkSpy:
+    """Any resolver or page-fetch call made through the real code paths is recorded."""
+    spy = _NetworkSpy()
+
+    def spy_resolve(self: LinkResolver, raw_url: str) -> ResolvedLink:
+        spy.resolver_calls.append(raw_url)
+        return ResolvedLink(status="unsupported", ref=None, reason="unsupported_link")
+
+    def spy_page(platform: str, url: str) -> LivePage | None:
+        spy.page_calls.append((platform, url))
+        return None
+
+    monkeypatch.setattr(LinkResolver, "resolve", spy_resolve)
+    monkeypatch.setattr(radar_process, "default_page_fetcher", spy_page)
+    return spy
 
 
 @pytest.fixture
@@ -59,72 +118,9 @@ def radar_client(
         with Session(engine) as s:
             yield s
 
-    def fake_resolve(url: str) -> ResolvedLink:
-        if "amzn.to/butter" in url or "B0BUTTER01" in url:
-            return ResolvedLink(
-                status="ok",
-                ref=ProductRef(
-                    platform="amazon",
-                    sku="B0BUTTER01",
-                    url="https://www.amazon.in/dp/B0BUTTER01",
-                ),
-            )
-        if "amzn.to/whey" in url or "B0WHEY1000" in url:
-            return ResolvedLink(
-                status="ok",
-                ref=ProductRef(
-                    platform="amazon",
-                    sku="B0WHEY1000",
-                    url="https://www.amazon.in/dp/B0WHEY1000",
-                ),
-            )
-        if "amzn.to/expired" in url or "B0EXPIRED1" in url:
-            return ResolvedLink(
-                status="ok",
-                ref=ProductRef(
-                    platform="amazon",
-                    sku="B0EXPIRED1",
-                    url="https://www.amazon.in/dp/B0EXPIRED1",
-                ),
-            )
-        return ResolvedLink(status="unsupported", ref=None, reason="unsupported_link")
-
-    def fake_page_fetch(platform: str, url: str) -> LivePage:
-        if "B0BUTTER01" in url:
-            return LivePage(
-                listed_paise=29000,
-                mrp_paise=32000,
-                in_stock=True,
-                title="Amul Butter 500g",
-            )
-        if "B0WHEY1000" in url:
-            return LivePage(
-                listed_paise=240000,
-                mrp_paise=329900,
-                in_stock=True,
-                title="Optimum Nutrition Whey Protein 1kg",
-            )
-        if "B0EXPIRED1" in url:
-            return LivePage(
-                listed_paise=299900,
-                mrp_paise=329900,
-                in_stock=True,
-                title="Optimum Nutrition Whey Protein 1kg",
-            )
-        raise AssertionError(f"Unexpected page fetch for {url}")
-
-    resolver = LinkResolver(
-        http_fetch=lambda u, m: (404, {}, b""),
-        now=lambda: FIXED_NOW,
-        sleep=lambda s: None,
-    )
-    resolver.resolve = fake_resolve  # type: ignore[method-assign]
-
     app.dependency_overrides[get_session] = override_get_session
     app.dependency_overrides[clock.now] = lambda: FIXED_NOW
     app.dependency_overrides[get_notifier] = lambda: fake_notifier
-    app.dependency_overrides[get_resolver] = lambda: resolver
-    app.dependency_overrides[get_page_fetcher] = lambda: fake_page_fetch
 
     with Session(engine) as s:
         user1 = s.exec(select(AppUser).where(AppUser.email == "owner@dealscour.local")).first()
@@ -248,6 +244,7 @@ def test_case_7_channel_allowlist_and_household_isolation(
     radar_client: TestClient,
     engine: Engine,
     fake_notifier: FakeNotifier,
+    network: _NetworkSpy,
 ) -> None:
     tok = radar_client.post("/api/v1/radar/extension-token").json()["token"]
     bearer = {"Authorization": f"Bearer {tok}"}
@@ -350,14 +347,16 @@ def test_case_7_channel_allowlist_and_household_isolation(
         },
     )
     assert ingest_unlisted.status_code == 200
-    assert ingest_unlisted.json()["processed"] == 0
+    assert ingest_unlisted.json()["accepted"] == 0
     assert ingest_unlisted.json()["ignored"] == 2
     assert len(fake_notifier.sent) == 0
 
     with Session(engine) as s:
         assert s.exec(select(RadarPost)).all() == []
 
-    # Now post from household 1's enabled channel -> processed, GOOD verdict, alert sent, observation saved!
+    # Now post from household 1's enabled channel. Ingest only stores pending posts: it makes no
+    # resolver, page or notifier calls (item 19).
+    started = time.perf_counter()
     ingest_good = radar_client.post(
         "/api/v1/radar/posts",
         headers=bearer,
@@ -368,22 +367,64 @@ def test_case_7_channel_allowlist_and_household_isolation(
                     "message_id": "101",
                     "text": "Loot ₹290 : https://amzn.to/butter",
                     "links": ["https://amzn.to/butter"],
+                    "posted_at": (FIXED_NOW - timedelta(minutes=1)).isoformat(),
                 },
                 {
                     "peer_id": "-1001191090845",
                     "message_id": "102",
                     "text": "Whey 1kg @2400 https://amzn.to/expired",
                     "links": ["https://amzn.to/expired"],
+                    "posted_at": (FIXED_NOW - timedelta(minutes=1)).isoformat(),
                 },
             ]
         },
     )
+    assert time.perf_counter() - started < 1.0
     assert ingest_good.status_code == 200
     body = ingest_good.json()
-    assert body["processed"] == 2
-    assert body["alerts_created"] == 1
+    assert body["accepted"] == 2
+    assert [p["verdict"] for p in body["posts"]] == ["pending", "pending"]
+    assert network.resolver_calls == []
+    assert network.page_calls == []
+    assert len(fake_notifier.sent) == 0
+
+    with Session(engine) as s:
+        rows = s.exec(select(RadarPost).order_by(col(RadarPost.id))).all()
+        assert [r.status for r in rows] == ["pending", "pending"]
+        assert json.loads(rows[0].pairs_json) == [
+            {"price_paise": 29000, "url": "https://amzn.to/butter"}
+        ]
+        assert s.exec(select(RadarAlert)).all() == []
+
+    # Re-posting the same message ids is deduped.
+    dup = radar_client.post(
+        "/api/v1/radar/posts",
+        headers=bearer,
+        json={
+            "posts": [
+                {"peer_id": "-1001191090845", "message_id": "101", "text": "x", "links": []},
+            ]
+        },
+    )
+    assert dup.json()["deduped"] == 1
+    assert dup.json()["accepted"] == 0
+
+    # The background step resolves, decides and alerts.
+    with Session(engine) as s:
+        handled = process_pending_posts(
+            s,
+            FIXED_NOW,
+            resolver=FakeResolver(),
+            page_fetcher=fake_page_fetch,
+            notifier=fake_notifier,
+        )
+    assert handled == 2
     assert len(fake_notifier.sent) == 1
     assert fake_notifier.sent[0].price_paise == 29000
+
+    posts_res = radar_client.get("/api/v1/radar/posts")
+    verdicts = {p["message_id"]: p["verdict"] for p in posts_res.json()["posts"]}
+    assert verdicts == {"101": "good", "102": "expired"}
 
     # Verify browser alerts polling endpoint GET /radar/alerts
     alerts_res = radar_client.get("/api/v1/radar/alerts", headers=bearer)
@@ -404,3 +445,51 @@ def test_case_7_channel_allowlist_and_household_isolation(
         ).all()
         assert len(fetcher_obs) == 1
         assert fetcher_obs[0].listed_paise == 29000
+
+
+# Item 21 / 23: a backlog post (7 h old) is stored as too_old and never resolved or fetched.
+def test_ingest_stores_backlog_post_as_too_old_without_any_network_calls(
+    radar_client: TestClient,
+    engine: Engine,
+    network: _NetworkSpy,
+) -> None:
+    tok = radar_client.post("/api/v1/radar/extension-token").json()["token"]
+    radar_client.post(
+        "/api/v1/radar/channels",
+        json={"peer_id": "-1001191090845", "name": "Offer Box 2.0"},
+    )
+
+    res = radar_client.post(
+        "/api/v1/radar/posts",
+        headers={"Authorization": f"Bearer {tok}"},
+        json={
+            "posts": [
+                {
+                    "peer_id": "-1001191090845",
+                    "message_id": "7h",
+                    "text": "Loot ₹99 : https://amzn.to/x",
+                    "links": ["https://amzn.to/x"],
+                    "posted_at": (FIXED_NOW - timedelta(hours=7)).isoformat(),
+                },
+                {
+                    "peer_id": "-1001191090845",
+                    "message_id": "1h",
+                    "text": "Loot ₹99 : https://amzn.to/y",
+                    "links": ["https://amzn.to/y"],
+                    "posted_at": (FIXED_NOW - timedelta(hours=1)).isoformat(),
+                },
+            ]
+        },
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["accepted"] == 1
+    assert body["too_old"] == 1
+    assert network.resolver_calls == []
+    assert network.page_calls == []
+
+    with Session(engine) as s:
+        by_msg = {r.message_id: r for r in s.exec(select(RadarPost)).all()}
+        assert by_msg["7h"].status == "too_old"
+        assert by_msg["7h"].verdict == "too_old"
+        assert by_msg["1h"].status == "pending"

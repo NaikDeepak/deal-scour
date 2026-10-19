@@ -4,44 +4,19 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Literal
+from urllib.parse import unquote, urlparse
 
 from app.core.money import Paise
 from app.domain.catalog import rate_basis
 from app.pricing.units import Unit, parse_pack, unit_rate
 from app.sources.autofill import _extract_family_and_category, _extract_pack_label
 
-VerdictStatus = Literal["good", "expired", "not_relevant", "unsupported_link"]
+VerdictStatus = Literal["good", "expired", "not_relevant", "unsupported_link", "skipped_budget"]
 
-_GENERIC_POST_WORDS = frozenset(
-    {
-        "loot",
-        "deal",
-        "deals",
-        "offer",
-        "offers",
-        "steal",
-        "price",
-        "drop",
-        "fast",
-        "grab",
-        "now",
-        "buy",
-        "link",
-        "apply",
-        "coupon",
-        "code",
-        "off",
-        "flat",
-        "rs",
-        "inr",
-        "at",
-        "mrp",
-        "only",
-        "from",
-        "amazon",
-        "flipkart",
-    }
-)
+# Path pieces of an Amazon/Flipkart product URL that are not product words.
+_NON_SLUG_SEGMENTS = frozenset({"dp", "gp", "product", "p", "aw", "d"})
+_ASIN_RE = re.compile(r"^(?=[A-Z0-9]{10}$)(?=.*\d)[A-Z0-9]+$")
+_FLIPKART_ITEM_RE = re.compile(r"^itm[a-z0-9]{6,20}$", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -87,18 +62,26 @@ class VerdictOutcome:
     live_in_stock: bool | None = None
 
 
-def _has_meaningful_product_hint(post_text: str) -> str:
-    """Strip URLs, prices, numbers, and generic deal buzzwords to see if post names a product."""
-    without_urls = re.sub(r"https?://\S+", " ", post_text or "")
-    without_prices = re.sub(
-        r"(?:₹|@|\brs\.?|\binr)\s*[0-9][0-9,]*(?:\.[0-9]+)?\*?",
-        " ",
-        without_urls,
-        flags=re.I,
-    )
-    words = re.findall(r"[A-Za-z]{3,}", without_prices.lower())
-    meaningful = [w for w in words if w not in _GENERIC_POST_WORDS]
-    return " ".join(meaningful)
+def url_slug_words(url: str | None) -> str:
+    """Product words from a resolved URL path, e.g. '/Tata-Sampann-Almonds-500g/dp/B0…' -> 'Tata Sampann Almonds 500g'."""
+    if not url:
+        return ""
+    try:
+        path = urlparse(url).path
+    except ValueError:
+        return ""
+    words: list[str] = []
+    for raw_segment in path.split("/"):
+        segment = unquote(raw_segment).strip()
+        if (
+            not segment
+            or segment.lower() in _NON_SLUG_SEGMENTS
+            or _ASIN_RE.match(segment)
+            or _FLIPKART_ITEM_RE.match(segment)
+        ):
+            continue
+        words.append(re.sub(r"[-_+]+", " ", segment))
+    return " ".join(words)
 
 
 def _matches_keywords_or_families(
@@ -180,6 +163,8 @@ def decide_verdict(
     tracked_families: set[str],
     family_best_rates: dict[str, FamilyRate],
     fetch_page: Callable[[], LivePage | None] | None = None,
+    final_url: str | None = None,
+    untracked_fetch_allowed: bool = True,
 ) -> VerdictOutcome:
     """Pure decision function for a resolved product link in a Telegram post."""
     # 1. Tracked product (Rule 6)
@@ -253,17 +238,23 @@ def decide_verdict(
     if platform not in ("amazon", "flipkart"):
         return VerdictOutcome(verdict="not_relevant", reasons=["not_relevant"])
 
-    # Pre-fetch relevance check: if the post text clearly describes a product (e.g. "Luggage")
-    # and does NOT match any keyword or tracked family, skip fetching the page!
-    hint_words = _has_meaningful_product_hint(post_text)
-    if hint_words:
-        matched_hint, _, _ = _matches_keywords_or_families(post_text, keywords, tracked_families)
-        if not matched_hint:
-            return VerdictOutcome(
-                verdict="not_relevant",
-                reasons=["not_relevant"],
-                posted_paise=posted_paise,
-            )
+    # Relevance gate, before any page fetch: the post text and the resolved URL's slug words must match a
+    # household keyword or a tracked family. A bare "Loot ₹99 : link" with a luggage slug costs nothing.
+    gate_text = f"{post_text} {url_slug_words(final_url)}"
+    gate_matched, _, _ = _matches_keywords_or_families(gate_text, keywords, tracked_families)
+    if not gate_matched:
+        return VerdictOutcome(
+            verdict="not_relevant",
+            reasons=["not_relevant"],
+            posted_paise=posted_paise,
+        )
+
+    if not untracked_fetch_allowed:
+        return VerdictOutcome(
+            verdict="skipped_budget",
+            reasons=["skipped_budget"],
+            posted_paise=posted_paise,
+        )
 
     if fetch_page is None:
         return VerdictOutcome(
