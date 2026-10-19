@@ -157,6 +157,33 @@ describe('FindOnShops', () => {
     expect(html).toContain('no product links on its search page')
   })
 
+  it('renders "Open search on Instamart ↗" for instamart no_links and "No results on Zepto" for zepto', () => {
+    const html = renderToStaticMarkup(
+      createElement(FindOnShops, {
+        product: PRODUCT,
+        extReady: true,
+        initialSearchUrls: SEARCH_URLS,
+        initialNoLinkShops: [
+          {
+            platform: 'instamart',
+            status: 'no_links',
+            search_url: 'https://www.swiggy.com/instamart/search?query=Sunflower+Seeds+500g',
+          },
+          {
+            platform: 'zepto',
+            status: 'no_links',
+            search_url: 'https://www.zepto.com/search?query=Sunflower+Seeds+500g',
+          },
+        ],
+        onClose: () => {},
+      }),
+    )
+    expect(html).toContain('Open search on Instamart ↗')
+    expect(html).toContain('Instamart: no product links on its search page')
+    expect(html).toContain('No results on Zepto.')
+    expect(html).toContain('Open search ↗')
+  })
+
   it('candidate with null pack_label renders pack input and disables checkbox until typed', () => {
     const candidateNoPack: CatalogCandidate = {
       platform: 'flipkart',

@@ -2,7 +2,13 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { extractCandidates, parseHtmlToDom, waitForCandidates, parsePackLabel } = require('../finder.js');
+const {
+  extractCandidates,
+  parseHtmlToDom,
+  waitForCandidates,
+  parsePackLabel,
+  isSponsoredAdAlt,
+} = require('../finder.js');
 
 const FIXTURES_DIR = path.join(__dirname, 'fixtures');
 
@@ -48,6 +54,42 @@ describe('Case 8: finder.js extractCandidates on search snippets', () => {
     assert.ok(candidates[2].url.includes('pid=ALM1000003'));
     assert.equal(candidates[2].price_paise, 89000);
     assert.equal(candidates[2].pack_label, '1kg');
+  });
+
+  it('extracts deduped candidates from Zepto search snippet and ignores ad cards', () => {
+    const html = fs.readFileSync(path.join(FIXTURES_DIR, 'zepto-search.html'), 'utf8');
+    const dom = parseHtmlToDom(html, 'https://www.zepto.com/search?query=sunflower+seeds');
+    const candidates = extractCandidates(dom);
+
+    assert.equal(candidates.length, 3);
+    assert.ok(!candidates.some((c) => c.url.includes('c3480d95')));
+
+    assert.equal(candidates[0].title, 'Daily Good Sunflower Seeds');
+    assert.equal(candidates[0].price_paise, 3700);
+    assert.equal(candidates[0].pack_label, '100g');
+    assert.ok(!candidates[0].title.includes('₹'));
+    assert.ok(!candidates[0].title.includes('ADD'));
+
+    assert.equal(candidates[1].title, 'Farmley Premium Sunflower Seeds');
+    assert.equal(candidates[1].price_paise, 12900);
+    assert.equal(candidates[1].pack_label, '250g');
+    assert.ok(!candidates[1].title.includes('₹'));
+    assert.ok(!candidates[1].title.includes('ADD'));
+
+    assert.equal(candidates[2].title, 'True Elements Roasted Sunflower Seeds');
+    assert.equal(candidates[2].price_paise, 7300);
+    assert.equal(candidates[2].pack_label, '200g');
+    assert.ok(!candidates[2].title.includes('₹'));
+    assert.ok(!candidates[2].title.includes('ADD'));
+  });
+});
+
+describe('Case 3 (Spec): Ad alt matcher', () => {
+  it('matches ad alt markers and rejects non-ad alts', () => {
+    assert.equal(isSponsoredAdAlt('P3 - Ad.png'), true);
+    assert.equal(isSponsoredAdAlt('Badam Giri'), false);
+    assert.equal(isSponsoredAdAlt('Add to cart'), false);
+    assert.equal(isSponsoredAdAlt('ADD'), false);
   });
 });
 
@@ -234,7 +276,47 @@ describe('Case 18: Worker timeout skip and single-find concurrency guard', () =>
     assert.equal(fakeChrome._createdTabs.length, 1);
     assert.equal(fakeChrome._executedScripts.length, 0);
     assert.deepEqual(fakeChrome._removedTabIds, [fakeChrome._createdTabs[0].id]);
-    assert.deepEqual(response.results, []);
+    assert.deepEqual(response.results, [
+      {
+        platform: 'amazon',
+        status: 'no_links',
+        search_url: 'https://www.amazon.in/s?k=almonds',
+      },
+    ]);
+  });
+
+  it('on executeScript failure reports no_links and removes the tab', async () => {
+    const fakeChrome = createFakeChrome({ completeTabs: true });
+    fakeChrome.scripting.executeScript = async () => {
+      throw new Error('Script injection failed');
+    };
+    globalThis.chrome = fakeChrome;
+    const { handleRuntimeMessage, resetWorkerStateForTests } = require('../service-worker.js');
+    resetWorkerStateForTests();
+
+    const response = await new Promise((resolve) => {
+      handleRuntimeMessage(
+        {
+          type: 'DEALSCOUR_FIND_PRODUCT',
+          catalogId: 3,
+          delayMs: 0,
+          timeoutMs: 100,
+          targets: [{ platform: 'amazon', url: 'https://www.amazon.in/s?k=almonds' }],
+        },
+        { id: 'dealscour-ext-id', tab: { id: 1, url: 'http://127.0.0.1:8000/' } },
+        resolve
+      );
+    });
+
+    assert.equal(fakeChrome._createdTabs.length, 1);
+    assert.deepEqual(fakeChrome._removedTabIds, [fakeChrome._createdTabs[0].id]);
+    assert.deepEqual(response.results, [
+      {
+        platform: 'amazon',
+        status: 'no_links',
+        search_url: 'https://www.amazon.in/s?k=almonds',
+      },
+    ]);
   });
 
   it('rejects a second DEALSCOUR_FIND_PRODUCT while one is already running', async () => {
