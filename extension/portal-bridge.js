@@ -1,11 +1,28 @@
 // Content script running on the DealScour Web Portal.
 // Bridges window.postMessage from the React app to the extension's background service worker.
 (() => {
+  const PORTAL_ORIGINS = [
+    'http://localhost:8000',
+    'http://127.0.0.1:8000',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+  ];
+
+  if (!PORTAL_ORIGINS.includes(window.location.origin)) {
+    return;
+  }
+
   document.documentElement.setAttribute('data-dealscour-extension', 'installed');
   window.postMessage({ type: 'DEALSCOUR_EXTENSION_READY', version: '0.1.0' }, window.location.origin);
 
   window.addEventListener('message', async (event) => {
-    if (event.source !== window || !event.data || typeof event.data.type !== 'string') {
+    if (
+      !PORTAL_ORIGINS.includes(window.location.origin) ||
+      event.origin !== window.location.origin ||
+      event.source !== window ||
+      !event.data ||
+      typeof event.data.type !== 'string'
+    ) {
       return;
     }
 
@@ -67,9 +84,6 @@
     }
 
     if (event.data.type === 'DEALSCOUR_FIND_PRODUCT') {
-      if (event.origin !== window.location.origin) {
-        return;
-      }
       const catalogId = event.data.catalogId;
       const targets = Array.isArray(event.data.targets) ? event.data.targets : [];
       try {
@@ -78,6 +92,17 @@
           catalogId,
           targets,
         });
+        if (response && response.ok === false) {
+          window.postMessage(
+            {
+              type: 'DEALSCOUR_FIND_ERROR',
+              catalogId,
+              error: response.error || 'Search failed',
+            },
+            window.location.origin
+          );
+          return;
+        }
         window.postMessage(
           {
             type: 'DEALSCOUR_FIND_COMPLETE',
@@ -100,6 +125,9 @@
   });
 
   chrome.runtime.onMessage.addListener((message) => {
+    if (!PORTAL_ORIGINS.includes(window.location.origin)) {
+      return;
+    }
     if (
       message &&
       (message.type === 'DEALSCOUR_SCOUR_PROGRESS' ||
@@ -112,4 +140,3 @@
     }
   });
 })();
-

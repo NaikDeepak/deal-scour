@@ -1,9 +1,11 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const {
+  PORTAL_ORIGINS,
   parseRupeesToPaise,
   priceFromJsonLd,
   isAllowedUrl,
+  isAllowedSearchUrl,
   isProductPageUrl,
   extractProductId,
   pickAddButton,
@@ -204,3 +206,36 @@ describe('Case 18: isMatchingProductPage (product-id match helper)', () => {
     assert.equal(isMatchingProductPage(targetUrl, landedUrl), false);
   });
 });
+
+describe('Case 16: isAllowedSearchUrl and PORTAL_ORIGINS', () => {
+  it('exports the 4 allowed local portal origins', () => {
+    assert.deepEqual(PORTAL_ORIGINS, [
+      'http://localhost:8000',
+      'http://127.0.0.1:8000',
+      'http://localhost:5173',
+      'http://127.0.0.1:5173',
+    ]);
+  });
+
+  it('accepts the 5 exact platform search URL shapes', () => {
+    assert.equal(isAllowedSearchUrl('https://www.amazon.in/s?k=tata+toor+600g', 'amazon'), true);
+    assert.equal(isAllowedSearchUrl('https://www.flipkart.com/search?q=tata+toor+600g', 'flipkart'), true);
+    assert.equal(isAllowedSearchUrl('https://blinkit.com/s/?q=tata+toor+600g', 'blinkit'), true);
+    assert.equal(isAllowedSearchUrl('https://www.zepto.com/search?query=tata+toor+600g', 'zepto'), true);
+    assert.equal(
+      isAllowedSearchUrl('https://www.swiggy.com/instamart/search?query=tata+toor+600g', 'instamart'),
+      true
+    );
+  });
+
+  it('rejects product URLs, cross-platform URLs, http, lookalike hosts, and empty queries', () => {
+    assert.equal(isAllowedSearchUrl('https://www.amazon.in/dp/B07BG5M32L', 'amazon'), false);
+    assert.equal(isAllowedSearchUrl('https://www.flipkart.com/search?q=tata+toor', 'amazon'), false);
+    assert.equal(isAllowedSearchUrl('http://www.amazon.in/s?k=tata+toor', 'amazon'), false);
+    assert.equal(isAllowedSearchUrl('https://www.amazon.in.evil.com/s?k=tata+toor', 'amazon'), false);
+    assert.equal(isAllowedSearchUrl('https://amazon.in/s?k=tata+toor', 'amazon'), false);
+    assert.equal(isAllowedSearchUrl('https://www.amazon.in/s?k=', 'amazon'), false);
+    assert.equal(isAllowedSearchUrl('https://www.amazon.in/s', 'amazon'), false);
+  });
+});
+

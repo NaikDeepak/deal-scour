@@ -1,6 +1,21 @@
 // DealScour Extension Pure Helpers
 // Money is integer paise everywhere (ADR-009). No external dependencies.
 
+const PORTAL_ORIGINS = [
+  'http://localhost:8000',
+  'http://127.0.0.1:8000',
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+];
+
+const SEARCH_URL_RULES = {
+  amazon: { host: 'www.amazon.in', path: '/s', param: 'k' },
+  flipkart: { host: 'www.flipkart.com', path: '/search', param: 'q' },
+  blinkit: { host: 'blinkit.com', path: '/s/', param: 'q' },
+  zepto: { host: 'www.zepto.com', path: '/search', param: 'query' },
+  instamart: { host: 'www.swiggy.com', path: '/instamart/search', param: 'query' },
+};
+
 const ALLOWED_HOSTS = new Set([
   'amazon.in',
   'www.amazon.in',
@@ -245,15 +260,36 @@ function isMatchingProductPage(targetUrl, landedUrl) {
   }
 }
 
+function isAllowedSearchUrl(rawUrl, platform) {
+  if (!rawUrl || typeof rawUrl !== 'string' || !platform || typeof platform !== 'string') {
+    return false;
+  }
+  const rule = SEARCH_URL_RULES[platform.toLowerCase()];
+  if (!rule) return false;
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol !== 'https:') return false;
+    if (parsed.hostname.toLowerCase() !== rule.host) return false;
+    if (parsed.pathname !== rule.path) return false;
+    const q = parsed.searchParams.get(rule.param);
+    return typeof q === 'string' && q.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
+    PORTAL_ORIGINS,
     ALLOWED_HOSTS,
     parseRupeesToPaise,
     priceFromJsonLd,
     isAllowedUrl,
+    isAllowedSearchUrl,
     isProductPageUrl,
     pickAddButton,
     extractProductId,
     isMatchingProductPage,
   };
 }
+

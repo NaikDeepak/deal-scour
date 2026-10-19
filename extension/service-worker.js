@@ -2,11 +2,38 @@
 // Handles:
 // 1. DEALSCOUR_RUN_SCOUR: Sequential background tab price extraction across supported portals
 // 2. DEALSCOUR_RUN_ADD_TO_CART: Requires user click inside confirmation popup (confirm.html) before adding
+// 3. DEALSCOUR_FIND_PRODUCT: Sequential background tab search candidate extraction
 
-importScripts('lib.js');
+if (typeof importScripts === 'function') {
+  importScripts('lib.js');
+} else if (typeof require === 'function') {
+  Object.assign(globalThis, require('./lib.js'));
+}
 
 const lastOpenTimeByHost = new Map();
 let pendingCart = null;
+let findRunning = false;
+
+function resetWorkerStateForTests() {
+  lastOpenTimeByHost.clear();
+  pendingCart = null;
+  findRunning = false;
+}
+
+function isAllowedPortalSender(sender) {
+  try {
+    if (!sender || !globalThis.chrome || sender.id !== globalThis.chrome.runtime.id) {
+      return false;
+    }
+    if (!sender.tab || typeof sender.tab.url !== 'string') {
+      return false;
+    }
+    const origin = new URL(sender.tab.url).origin;
+    return PORTAL_ORIGINS.includes(origin);
+  } catch {
+    return false;
+  }
+}
 
 async function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -31,19 +58,23 @@ async function throttleHost(urlStr) {
 async function waitForTabComplete(tabId, timeoutMs = 12000) {
   return new Promise((resolve) => {
     let settled = false;
-    const done = () => {
+    let timer = null;
+    const finish = (status) => {
       if (settled) return;
       settled = true;
-      chrome.tabs.onUpdated.removeListener(listener);
-      resolve();
+      if (timer !== null) {
+        clearTimeout(timer);
+      }
+      globalThis.chrome.tabs.onUpdated.removeListener(listener);
+      resolve(status);
     };
     const listener = (updatedId, changeInfo) => {
-      if (updatedId === tabId && changeInfo.status === 'complete') {
-        done();
+      if (updatedId === tabId && changeInfo && changeInfo.status === 'complete') {
+        finish('complete');
       }
     };
-    chrome.tabs.onUpdated.addListener(listener);
-    setTimeout(done, timeoutMs);
+    globalThis.chrome.tabs.onUpdated.addListener(listener);
+    timer = setTimeout(() => finish('timeout'), timeoutMs);
   });
 }
 
@@ -51,18 +82,21 @@ async function scourSingleTarget(target) {
   let tabId = null;
   try {
     await throttleHost(target.url);
-    const createdTab = await chrome.tabs.create({ url: target.url, active: false });
+    const createdTab = await globalThis.chrome.tabs.create({ url: target.url, active: false });
     tabId = createdTab.id;
     if (!tabId) {
       return { listing_id: target.listing_id, ok: false, error: 'Failed to create background tab' };
     }
 
-    await waitForTabComplete(tabId, 12000);
-    await chrome.scripting.executeScript({
+    const tabStatus = await waitForTabComplete(tabId, 12000);
+    if (tabStatus === 'timeout') {
+      return { listing_id: target.listing_id, ok: false, error: 'Page load timed out' };
+    }
+    await globalThis.chrome.scripting.executeScript({
       target: { tabId },
       files: ['lib.js', 'extractors.js'],
     });
-    const injectionResults = await chrome.scripting.executeScript({
+    const injectionResults = await globalThis.chrome.scripting.executeScript({
       target: { tabId },
       func: () => (typeof extractDealScourPriceFromDOM === 'function' ? extractDealScourPriceFromDOM() : null),
     });
@@ -85,7 +119,7 @@ async function scourSingleTarget(target) {
   } finally {
     if (tabId !== null) {
       try {
-        await chrome.tabs.remove(tabId);
+        await globalThis.chrome.tabs.remove(tabId);
       } catch {
         // tab may already be closed
       }
@@ -98,7 +132,7 @@ async function addSingleItemToCart(item, isLastItem) {
   try {
     await throttleHost(item.url);
     const isProduct = isProductPageUrl(item.url);
-    const createdTab = await chrome.tabs.create({ url: item.url, active: isLastItem });
+    const createdTab = await globalThis.chrome.tabs.create({ url: item.url, active: isLastItem });
     tabId = createdTab.id;
     if (!tabId) {
       return { title: item.title, platform: item.platform, added: false, reason: 'Failed to open tab' };
@@ -114,12 +148,12 @@ async function addSingleItemToCart(item, isLastItem) {
     }
 
     await waitForTabComplete(tabId, 12000);
-    await chrome.scripting.executeScript({
+    await globalThis.chrome.scripting.executeScript({
       target: { tabId },
       files: ['lib.js', 'cart-adder.js'],
     });
     const packs = Number(item.packs) > 0 ? Number(item.packs) : 1;
-    const injectionResults = await chrome.scripting.executeScript({
+    const injectionResults = await globalThis.chrome.scripting.executeScript({
       target: { tabId },
       func: (p, u) =>
         typeof addDealScourItemToCart === 'function' ? addDealScourItemToCart(p, u) : { added: false },
@@ -128,7 +162,7 @@ async function addSingleItemToCart(item, isLastItem) {
     const res = injectionResults && injectionResults[0] ? injectionResults[0].result : { added: false };
     if (res && res.added && !isLastItem) {
       try {
-        await chrome.tabs.remove(tabId);
+        await globalThis.chrome.tabs.remove(tabId);
       } catch {
         // ignore
       }
@@ -144,17 +178,18 @@ async function addSingleItemToCart(item, isLastItem) {
   }
 }
 
-
 function isFromPendingConfirmWindow(message, sender) {
   if (!pendingCart || message.requestId !== pendingCart.id) return false;
-  const confirmUrl = chrome.runtime.getURL('confirm.html');
-  if (!sender || sender.id !== chrome.runtime.id || !sender.url || !sender.url.startsWith(confirmUrl)) return false;
+  const confirmUrl = globalThis.chrome.runtime.getURL('confirm.html');
+  if (!sender || sender.id !== globalThis.chrome.runtime.id || !sender.url || !sender.url.startsWith(confirmUrl)) {
+    return false;
+  }
   return !sender.tab || sender.tab.windowId === pendingCart.windowId;
 }
 
 async function clearPendingStorage() {
   try {
-    await chrome.storage.local.remove(['pendingCartItems', 'pendingCartId']);
+    await globalThis.chrome.storage.local.remove(['pendingCartItems', 'pendingCartId']);
   } catch {
     // ignore
   }
@@ -171,7 +206,7 @@ async function executePendingAddToCart() {
     const item = items[i];
     if (senderTabId) {
       try {
-        await chrome.tabs.sendMessage(senderTabId, {
+        await globalThis.chrome.tabs.sendMessage(senderTabId, {
           type: 'DEALSCOUR_CART_PROGRESS',
           current: i + 1,
           total: items.length,
@@ -208,7 +243,7 @@ async function executePendingAddToCart() {
 
   if (senderTabId) {
     try {
-      await chrome.tabs.sendMessage(senderTabId, {
+      await globalThis.chrome.tabs.sendMessage(senderTabId, {
         type: 'DEALSCOUR_ADD_TO_CART_COMPLETE',
         results,
       });
@@ -241,7 +276,7 @@ function cancelPendingAddToCart(reason = 'Cancelled by user') {
 
   if (senderTabId) {
     try {
-      chrome.tabs.sendMessage(senderTabId, {
+      globalThis.chrome.tabs.sendMessage(senderTabId, {
         type: 'DEALSCOUR_ADD_TO_CART_COMPLETE',
         results,
       });
@@ -251,19 +286,12 @@ function cancelPendingAddToCart(reason = 'Cancelled by user') {
   }
 }
 
-chrome.windows.onRemoved.addListener((windowId) => {
-  if (pendingCart && pendingCart.windowId === windowId) {
-    cancelPendingAddToCart('Confirmation window closed');
-  }
-});
-
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+function handleRuntimeMessage(message, sender, sendResponse) {
   if (!message || typeof message.type !== 'string') {
     return false;
   }
 
   if (message.type === 'DEALSCOUR_CONFIRMED_ADD_TO_CART' || message.type === 'DEALSCOUR_CANCELLED_ADD_TO_CART') {
-    // Only the confirm.html window opened for this exact request may answer it.
     if (!isFromPendingConfirmWindow(message, sender)) {
       sendResponse({ ok: false, reason: 'This request has expired. Start again from DealScour.' });
       return true;
@@ -281,18 +309,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'DEALSCOUR_RUN_SCOUR') {
+    if (!isAllowedPortalSender(sender)) {
+      return false;
+    }
     (async () => {
-      // Max 15 targets per scour run
       const allTargets = Array.isArray(message.targets) ? message.targets : [];
       const targets = allTargets.slice(0, 15);
       const results = [];
-      await chrome.storage.local.set({ lastScourCount: targets.length });
+      await globalThis.chrome.storage.local.set({ lastScourCount: targets.length });
 
       for (let i = 0; i < targets.length; i += 1) {
         const target = targets[i];
         if (sender.tab && sender.tab.id) {
           try {
-            await chrome.tabs.sendMessage(sender.tab.id, {
+            await globalThis.chrome.tabs.sendMessage(sender.tab.id, {
               type: 'DEALSCOUR_SCOUR_PROGRESS',
               current: i + 1,
               total: targets.length,
@@ -305,7 +335,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
         }
 
-        // Refuse unsupported shop links
         if (!isAllowedUrl(target.url)) {
           results.push({
             listing_id: target.listing_id,
@@ -325,8 +354,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'DEALSCOUR_RUN_ADD_TO_CART') {
+    if (!isAllowedPortalSender(sender)) {
+      return false;
+    }
     (async () => {
-      // Max 15 items per add-to-cart run
       const allItems = Array.isArray(message.items) ? message.items : [];
       const items = allItems.slice(0, 15);
       if (pendingCart) {
@@ -341,10 +372,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
       }
       const requestId = crypto.randomUUID();
-      await chrome.storage.local.set({ pendingCartItems: items, pendingCartId: requestId, lastCartItemCount: items.length });
+      await globalThis.chrome.storage.local.set({
+        pendingCartItems: items,
+        pendingCartId: requestId,
+        lastCartItemCount: items.length,
+      });
 
       try {
-        const win = await chrome.windows.create({
+        const win = await globalThis.chrome.windows.create({
           url: `confirm.html?id=${requestId}`,
           type: 'popup',
           width: 420,
@@ -374,100 +409,136 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'DEALSCOUR_FIND_PRODUCT') {
+    if (!isAllowedPortalSender(sender)) {
+      return false;
+    }
+    if (findRunning) {
+      sendResponse({ ok: false, error: 'A search is already running.' });
+      return true;
+    }
+
+    findRunning = true;
     (async () => {
-      const allTargets = Array.isArray(message.targets) ? message.targets : [];
-      const targets = allTargets.slice(0, 5);
-      const results = [];
+      try {
+        const allTargets = Array.isArray(message.targets) ? message.targets : [];
+        const targets = allTargets.slice(0, 5);
+        const delayMs = typeof message.delayMs === 'number' ? message.delayMs : 3000;
+        const timeoutMs = typeof message.timeoutMs === 'number' ? message.timeoutMs : 20000;
+        const results = [];
 
-      for (let i = 0; i < targets.length; i += 1) {
-        const target = targets[i];
-        if (!target || !isAllowedUrl(target.url)) {
-          continue;
-        }
-        if (i > 0) {
-          await sleep(3000);
-        }
-
-        if (sender.tab && sender.tab.id) {
-          try {
-            await chrome.tabs.sendMessage(sender.tab.id, {
-              type: 'DEALSCOUR_FIND_PROGRESS',
-              catalogId: message.catalogId,
-              current: i + 1,
-              total: targets.length,
-              platform: target.platform,
-              found: 0,
-              status: 'searching',
-            });
-          } catch {
-            // portal tab may have closed
+        for (let i = 0; i < targets.length; i += 1) {
+          const target = targets[i];
+          if (!target || !isAllowedSearchUrl(target.url, target.platform)) {
+            continue;
           }
-        }
-
-        let tabId = null;
-        let shopCandidates = [];
-        try {
-          const createdTab = await chrome.tabs.create({ url: target.url, active: false });
-          tabId = createdTab.id;
-          if (tabId) {
-            await waitForTabComplete(tabId, 20000);
-            await chrome.scripting.executeScript({
-              target: { tabId },
-              files: ['lib.js', 'finder.js'],
-            });
-            const injectionResults = await chrome.scripting.executeScript({
-              target: { tabId },
-              func: () => (typeof extractCandidates === 'function' ? extractCandidates(document) : []),
-            });
-            const extracted =
-              injectionResults && injectionResults[0] && Array.isArray(injectionResults[0].result)
-                ? injectionResults[0].result
-                : [];
-            shopCandidates = extracted.slice(0, 5).map((c) => ({
-              platform: target.platform,
-              url: c.url,
-              title: c.title,
-              price_paise: c.price_paise ?? null,
-              pack_label: c.pack_label ?? null,
-            }));
+          if (i > 0 && delayMs > 0) {
+            await sleep(delayMs);
           }
-        } catch {
-          // 20 s timeout or script error skips that shop
-          shopCandidates = [];
-        } finally {
-          if (tabId !== null) {
+
+          if (sender.tab && sender.tab.id) {
             try {
-              await chrome.tabs.remove(tabId);
+              await globalThis.chrome.tabs.sendMessage(sender.tab.id, {
+                type: 'DEALSCOUR_FIND_PROGRESS',
+                catalogId: message.catalogId,
+                current: i + 1,
+                total: targets.length,
+                platform: target.platform,
+                found: 0,
+                status: 'searching',
+              });
             } catch {
-              // tab may already be closed
+              // portal tab may have closed
+            }
+          }
+
+          let tabId = null;
+          let shopCandidates = [];
+          try {
+            const createdTab = await globalThis.chrome.tabs.create({ url: target.url, active: false });
+            tabId = createdTab.id;
+            if (tabId) {
+              const tabStatus = await waitForTabComplete(tabId, timeoutMs);
+              if (tabStatus === 'complete') {
+                await globalThis.chrome.scripting.executeScript({
+                  target: { tabId },
+                  files: ['lib.js', 'finder.js'],
+                });
+                const injectionResults = await globalThis.chrome.scripting.executeScript({
+                  target: { tabId },
+                  func: () => (typeof extractCandidates === 'function' ? extractCandidates(document) : []),
+                });
+                const extracted =
+                  injectionResults && injectionResults[0] && Array.isArray(injectionResults[0].result)
+                    ? injectionResults[0].result
+                    : [];
+                shopCandidates = extracted.slice(0, 5).map((c) => ({
+                  platform: target.platform,
+                  url: c.url,
+                  title: c.title,
+                  price_paise: c.price_paise ?? null,
+                  pack_label: c.pack_label ?? null,
+                }));
+              }
+            }
+          } catch {
+            shopCandidates = [];
+          } finally {
+            if (tabId !== null) {
+              try {
+                await globalThis.chrome.tabs.remove(tabId);
+              } catch {
+                // tab may already be closed
+              }
+            }
+          }
+
+          results.push(...shopCandidates);
+
+          if (sender.tab && sender.tab.id) {
+            try {
+              await globalThis.chrome.tabs.sendMessage(sender.tab.id, {
+                type: 'DEALSCOUR_FIND_PROGRESS',
+                catalogId: message.catalogId,
+                current: i + 1,
+                total: targets.length,
+                platform: target.platform,
+                found: shopCandidates.length,
+                status: 'done',
+              });
+            } catch {
+              // ignore
             }
           }
         }
 
-        results.push(...shopCandidates);
-
-        if (sender.tab && sender.tab.id) {
-          try {
-            await chrome.tabs.sendMessage(sender.tab.id, {
-              type: 'DEALSCOUR_FIND_PROGRESS',
-              catalogId: message.catalogId,
-              current: i + 1,
-              total: targets.length,
-              platform: target.platform,
-              found: shopCandidates.length,
-              status: 'done',
-            });
-          } catch {
-            // ignore
-          }
-        }
+        sendResponse({ ok: true, results });
+      } finally {
+        findRunning = false;
       }
-
-      sendResponse({ results });
     })();
     return true;
   }
 
   return false;
-});
+}
 
+if (typeof chrome !== 'undefined' && chrome.windows && chrome.windows.onRemoved) {
+  chrome.windows.onRemoved.addListener((windowId) => {
+    if (pendingCart && pendingCart.windowId === windowId) {
+      cancelPendingAddToCart('Confirmation window closed');
+    }
+  });
+}
+
+if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
+  chrome.runtime.onMessage.addListener(handleRuntimeMessage);
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    handleRuntimeMessage,
+    waitForTabComplete,
+    isAllowedPortalSender,
+    resetWorkerStateForTests,
+  };
+}

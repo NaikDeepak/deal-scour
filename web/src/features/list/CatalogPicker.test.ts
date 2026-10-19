@@ -1,8 +1,9 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import type { CatalogProductItem } from '../../lib/api'
-import { CatalogResultsSection, catalogProductToNeed } from './CatalogPicker'
+import type { CatalogProductItem, SavedNeed } from '../../lib/api'
+import PlansPage from '../plans/PlansPage'
+import { CatalogResultsSection, catalogProductToNeed, searchCatalogItems } from './CatalogPicker'
 
 const SAMPLE_CATALOG: CatalogProductItem[] = [
   {
@@ -82,4 +83,42 @@ describe('CatalogPicker', () => {
       lock_platform: null,
     })
   })
+
+  it('Case 19: on the Plan page, typing "toor" shows the catalog result and a catalog need shows Find on shops', async () => {
+    const matched = await searchCatalogItems('toor', async (q) =>
+      SAMPLE_CATALOG.filter((item) => item.name.toLowerCase().includes(q.toLowerCase())),
+    )
+    expect(matched).toHaveLength(1)
+    expect(matched[0].name).toBe('Tata Sampann Toor/Arhar Dal')
+
+    const catalogNeed: SavedNeed = {
+      id: 101,
+      list_id: 1,
+      line_id: 'Tata Sampann Toor/Arhar Dal 600g',
+      product_key: null,
+      family_key: 'toor_dal',
+      quantity: '600g',
+      qty: 1,
+      need_by_minutes: null,
+      lock_platform: null,
+      status: 'open',
+    }
+
+    const html = renderToStaticMarkup(
+      createElement(PlansPage, {
+        onAccepted: () => {},
+        initialCatalogQuery: 'toor',
+        initialCatalogItems: matched,
+        initialOpenNeeds: [catalogNeed],
+      }),
+    )
+
+    expect(html).toContain('From your catalog')
+    expect(html).toContain('Tata Sampann Toor/Arhar Dal')
+    expect(html).toContain('Tata Sampann Toor/Arhar Dal 600g')
+    // Both the catalog result and the catalog open need render a "Find on shops" button
+    const findButtons = html.match(/Find on shops/g) ?? []
+    expect(findButtons.length).toBeGreaterThanOrEqual(2)
+  })
 })
+

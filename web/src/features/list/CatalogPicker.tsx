@@ -25,6 +25,16 @@ export function catalogProductToNeed(
   }
 }
 
+export async function searchCatalogItems(
+  rawQuery: string,
+  searchFn: (q: string, limit?: number) => Promise<CatalogProductItem[]> = catalog.search,
+): Promise<CatalogProductItem[]> {
+  const trimmed = rawQuery.trim()
+  if (!trimmed) return []
+  const res = await searchFn(trimmed, 8)
+  return res.slice(0, 8)
+}
+
 export function CatalogResultsSection({
   items,
   onPickCatalog,
@@ -82,9 +92,15 @@ export function CatalogNeedFindButton({
       onFindOnShops(catalogItem)
       return
     }
-    const results = await catalog.search(need.line_id, 1)
+    const queryText =
+      need.quantity && need.line_id.endsWith(` ${need.quantity}`)
+        ? need.line_id.slice(0, -(need.quantity.length + 1)).trim()
+        : need.line_id
+    const results = await catalog.search(queryText, 5)
     if (results.length > 0) {
-      onFindOnShops(results[0])
+      const exact =
+        results.find((r) => `${r.name} ${r.pack_label}` === need.line_id) ?? results[0]
+      onFindOnShops(exact)
     }
   }
 
@@ -103,19 +119,28 @@ export default function CatalogPicker({
   products = [],
   placeholder = 'Add an item…',
   extReady = false,
+  initialQuery = '',
+  initialCatalogItems = [],
   onPickProduct,
   onPickCatalogNeed,
+  onFindOnShops,
   onTrackedListings,
 }: {
   products?: Product[]
   placeholder?: string
   extReady?: boolean
+  initialQuery?: string
+  initialCatalogItems?: CatalogProductItem[]
   onPickProduct?: (productKey: string) => void
-  onPickCatalogNeed?: (need: Omit<NeedIn, 'line_id'> & { line_id: string }, item: CatalogProductItem) => void
+  onPickCatalogNeed?: (
+    need: Omit<NeedIn, 'line_id'> & { line_id: string },
+    item: CatalogProductItem,
+  ) => void
+  onFindOnShops?: (item: CatalogProductItem) => void
   onTrackedListings?: (listingIds: string[]) => void
 }) {
-  const [query, setQuery] = useState('')
-  const [catalogItems, setCatalogItems] = useState<CatalogProductItem[]>([])
+  const [query, setQuery] = useState(initialQuery)
+  const [catalogItems, setCatalogItems] = useState<CatalogProductItem[]>(initialCatalogItems)
   const [findingProduct, setFindingProduct] = useState<CatalogProductItem | null>(null)
 
   useEffect(() => {
@@ -126,10 +151,9 @@ export default function CatalogPicker({
     }
     let active = true
     const timer = setTimeout(() => {
-      catalog
-        .search(trimmed, 8)
+      searchCatalogItems(trimmed)
         .then((res) => {
-          if (active) setCatalogItems(res.slice(0, 8))
+          if (active) setCatalogItems(res)
         })
         .catch(() => {
           if (active) setCatalogItems([])
@@ -140,6 +164,14 @@ export default function CatalogPicker({
       clearTimeout(timer)
     }
   }, [query])
+
+  function handleFind(item: CatalogProductItem) {
+    if (onFindOnShops) {
+      onFindOnShops(item)
+    } else {
+      setFindingProduct(item)
+    }
+  }
 
   return (
     <div className="mt-2 space-y-2">
@@ -173,7 +205,7 @@ export default function CatalogPicker({
           setQuery('')
           setCatalogItems([])
         }}
-        onFindOnShops={(item) => setFindingProduct(item)}
+        onFindOnShops={handleFind}
       />
 
       {findingProduct && (
