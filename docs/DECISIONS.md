@@ -235,3 +235,25 @@ wants fewer clicks from a plan to a filled cart. A Chrome extension runs in the 
 - One-click bundles add **needs** to a list, never listings, prices or offers. Invented prices and offers are never stored (invariants 6 and 7).
 **Consequences.** Quick-commerce prices can be fresh without server scraping. Adding to cart acts inside the user's accounts, so selectors
 must fail closed (leave the tab open) rather than guess. Site layout changes break capture silently, which shows up as stale prices, not wrong ones.
+
+### ADR-026 · Deal radar: read Telegram deal channels through the extension, alert only on real deals
+*2026-10-19 · Accepted · extends ADR-025*
+**Context.** The owner follows Telegram deal channels (e.g. Offer Box 2.0). Most posts are not groceries, and many "loot" prices are gone in minutes.
+Reading Telegram from the server would need a Telegram login (MTProto userbot) and stored session secrets. WhatsApp alerts would need the paid
+WhatsApp Business API.
+**Decision.**
+- **Reading:** the extension's `telegram-reader.js` runs on `web.telegram.org` in the owner's open tab. It reads only the channels the owner listed
+  in DealScour and sends only `{peer_id, message_id, text, links, posted_at}`. It never clicks, types or sends anything in Telegram. No Telegram
+  login, API id or session is stored anywhere.
+- **Extension → server:** a per-household extension token (32 random bytes, SHA-256 stored, revoked when a new one is made), accepted only by the
+  radar's posts/alerts/channels endpoints. The usual CSRF header still applies.
+- **Processing:** ingest only stores posts. A background loop (`DEALSCOUR_RADAR=1`, every 60 s) does the following:
+  - resolves short links from a fixed allow-list (https, no userinfo, port 443 only, ≤ 4 hops, ≤ 1 per 2 s, ≤ 120 per hour)
+  - skips posts that match no keyword or tracked family, using the post text and the product URL's slug, **before** any page fetch
+  - verifies the live price (≤ posted + 5%, in stock) within a daily page-fetch budget (40)
+  - ignores posts older than 6 h
+- **Alerts:** a browser notification (the extension polls every 2 min) and a Telegram message from the owner's own bot (BYOK). Rules:
+  one alert per (product, price) per 24 h, at most 10 per 24 h, and Telegram messages held during quiet hours (23:00–07:00 **India time**).
+  No WhatsApp (AGENTS §9).
+**Consequences.** Alerts only work while Chrome with Telegram Web is open and the Mac is awake. Telegram Web layout changes can silently stop
+reading; that shows up as no new posts on the Radar page, not as wrong alerts. Most posts never cost a page fetch.

@@ -83,6 +83,12 @@ shapes, only for a request from the DealScour origin, one search at a time, ≥ 
 and closes the tab. `POST /catalog/{id}/candidates` drops non-product links and sorts by brand/pack/name words for display only. The owner ticks
 the right ones → normal `POST /listings`. Nothing is tracked without the tick.
 
+**Deal radar (ADR-026):** Telegram Web tab → extension reads only listed channels → `POST /radar/posts` (extension token) stores them
+`pending` → every 60 s the radar loop resolves links, drops posts that match no keyword or tracked family (post text + URL slug) without
+fetching, checks the live price for the rest, and decides `good`/`expired`/`not_relevant`/… → a good one becomes a `radar_alert`: Telegram
+message from the owner's bot (held in quiet hours, India time) and a Chrome notification (the extension polls `/radar/alerts` every 2 min).
+The Radar page lists channels, keywords and the last 50 posts with their verdicts. Deals shows a "From Telegram" section.
+
 ## 3. Optimizer request (system sequence)
 
 ```mermaid

@@ -519,3 +519,63 @@ export const dealsApi = {
   feed: () => call<DealFeedResponse>('/api/v1/deals/feed'),
 }
 
+export interface RadarChannelItem {
+  id: number
+  peer_id: string
+  name: string
+  enabled: boolean
+  created_at: string
+}
+
+export interface RadarKeywordItem {
+  id: number
+  keyword: string
+  created_at: string
+}
+
+export interface RadarPostItem {
+  id: number
+  peer_id: string
+  message_id: string
+  text: string
+  posted_at: string
+  verdict: 'good' | 'expired' | 'not_relevant' | 'unsupported_link' | string
+  reasons: string[]
+  platform: Platform | null
+  sku: string | null
+  listing_id: string | null
+  product_url: string | null
+  title: string | null
+  pack_label: string | null
+  family_key: string | null
+  posted_paise: number | null
+  live_paise: number | null
+  created_at: string
+}
+
+export const radarApi = {
+  channels: () => call<{ channels: RadarChannelItem[]; peer_ids: string[] }>('/api/v1/radar/channels'),
+  addChannel: (peer_id: string, name: string) =>
+    call<RadarChannelItem>('/api/v1/radar/channels', json({ peer_id, name })),
+  toggleChannel: (id: number, enabled: boolean) =>
+    call<RadarChannelItem>(`/api/v1/radar/channels/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ enabled }),
+    }),
+  deleteChannel: (id: number) => call<{ deleted: boolean }>(`/api/v1/radar/channels/${id}`, { method: 'DELETE' }),
+  keywords: () => call<{ keywords: RadarKeywordItem[] }>('/api/v1/radar/keywords'),
+  addKeyword: (keyword: string) => call<RadarKeywordItem>('/api/v1/radar/keywords', json({ keyword })),
+  deleteKeyword: (id: number) => call<{ deleted: boolean }>(`/api/v1/radar/keywords/${id}`, { method: 'DELETE' }),
+  posts: (verdict?: string) =>
+    call<{ posts: RadarPostItem[] }>(
+      `/api/v1/radar/posts${verdict ? `?verdict=${encodeURIComponent(verdict)}` : ''}`,
+    ),
+  createExtensionToken: () =>
+    call<{ token: string; created_at: string }>('/api/v1/radar/extension-token', { method: 'POST' }),
+  sendTestAlert: () =>
+    call<{ ok: boolean; telegram_sent: boolean; alert_id: number | null }>('/api/v1/radar/test-alert', {
+      method: 'POST',
+    }),
+}
+
+

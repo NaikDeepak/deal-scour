@@ -1,7 +1,7 @@
 # Task: deal radar — read Telegram deal channels, alert only on real deals
 
-**Assigned to:** agy  **Lead / reviewer:** claude  **Second review:** codex (read-only)
-**Branch:** `feat/deal-radar` (from `main` after `feat/scour-matrix-extension` and `feat/staples-tracker` merge)  **Worktree:** `../deal-scour-wt-agy`
+**Assigned to:** agy (model: gemini-4-argon-high)  **Lead / reviewer:** claude  **Second review:** codex (read-only)
+**Branch:** `feat/deal-radar` (from `main`; #31, #33 and #34 are merged)  **Worktree:** `../deal-scour-wt-agy`
 **Depends on:** the extension (PR #31) and the staples tracker (price history, watches, `/deals/feed`).
 
 ## Goal
@@ -19,10 +19,10 @@ a Telegram message from their own bot.
   host permissions, `notifications` and `alarms` permissions), `extension/options.html`, `extension/options.js` (new), `extension/service-worker.js`,
   `extension/lib.js`, `extension/tests/*.test.js`
 - `backend/app/radar/{__init__,posts,links,verdict}.py` (new), `backend/app/notify/{__init__,base,telegram}.py` (new)
-- `backend/app/api/v1/radar.py` (new), `backend/app/domain/models.py` (`RadarChannel`, `RadarPost`, `RadarAlert`, `RadarKeyword`),
+- `backend/app/api/v1/radar.py` (new), `backend/app/core/extension_auth.py` (new), `backend/app/domain/models.py` (`RadarChannel`, `RadarPost`, `RadarAlert`, `RadarKeyword`),
   `backend/migrations/versions/0009_radar.py` (new), `backend/app/core/config.py` (Telegram bot settings, quiet hours, daily alert cap)
 - `.env.example`, `backend/tests/radar/*`, `backend/tests/api/test_radar.py`, `backend/tests/test_migrations.py`
-- `web/src/features/radar/RadarPage.tsx` (new: channels, keywords, recent verdicts), `web/src/features/deals/DealsPage.tsx` (Telegram section),
+- `web/src/features/radar/RadarPage.tsx` (new: channels, keywords, recent verdicts, Connect extension), `extension/portal-bridge.js`, `web/src/features/deals/DealsPage.tsx` (Telegram section),
   `web/src/App.tsx`, `web/src/lib/api.ts`, matching tests
 
 ## Runtime boundary
@@ -81,3 +81,67 @@ a Telegram message from their own bot.
 ## Don'ts
 No Telegram login/MTProto/userbot, no reading chats outside the list, no clicking or sending in Telegram, no WhatsApp, no new deps, no Telegram or
 Gemini calls in tests. Don't edit `app/main.py` (lead wires router + startup). No inline `python -c`. One command per call, foreground only.
+
+## Added by the lead (2026-10-19, before you start)
+13. **Extension → server auth (new).** Until now only the DealScour page called the API. The radar's extension calls it from the
+    service worker while Telegram Web is the open tab, so it needs its own credential:
+    - `POST /radar/extension-token` (normal session auth + CSRF header) creates a random 32-byte token and returns it **once**. Only its
+      SHA-256 is stored (`RadarExtensionToken(household_id, token_hash, created_at, last_used_at, revoked)`, in migration 0009).
+      Creating a new token revokes the old one.
+    - The Radar page has a **Connect extension** button. It sends the token through `portal-bridge.js` (`DEALSCOUR_SET_RADAR_TOKEN`, from
+      `PORTAL_ORIGINS` only), and the worker saves it in `chrome.storage.local`. The page shows "Extension connected" (the worker answers ok).
+    - `POST /radar/posts` and `GET /radar/alerts` accept **only** `Authorization: Bearer <token>`: no session cookie, no CSRF header. A
+      constant-time hash compare; revoked or unknown → 401. No other endpoint accepts this token.
+    - The worker calls `http://localhost:8000` (configurable as `DEALSCOUR_API_ORIGIN` in `lib.js`, which must be one of `PORTAL_ORIGINS`).
+      Add that origin to `host_permissions`.
+14. **Content-script scope.** `telegram-reader.js` gets its own `content_scripts` entry for `https://web.telegram.org/*` only. It doesn't load
+    `portal-bridge.js`, and the portal entry stays on `PORTAL_ORIGINS`. The worker accepts `DEALSCOUR_RADAR_POSTS` only from a sender whose
+    tab URL host is exactly `web.telegram.org` and whose `sender.id` is ours.
+15. **Allowed peers come from the server:** `GET /radar/channels` (bearer) → enabled peer ids. Cache them in `chrome.storage.local` and refresh
+    with the 2-minute alarm. The reader sends nothing until the list is loaded.
+16. **Notification links:** a `chrome.notifications` click opens the alert's product URL only if `isProductPageUrl` (lib.js) accepts it.
+17. Startup job for held quiet-hour messages: expose `send_due_alerts(session, now, notifier)` in `notify/`. **Don't** add a scheduler; the lead
+    wires it in `app/main.py`'s lifespan (`// HOOK` comment in your handoff).
+
+Extra test cases:
+10. Token: create → bearer works on posts/alerts; second create → the first is 401; the token never appears in GET responses or caplog; a session
+    cookie alone on `/radar/posts` → 401.
+11. Worker: `DEALSCOUR_RADAR_POSTS` from a non-telegram tab → ignored; `DEALSCOUR_SET_RADAR_TOKEN` from a non-portal origin → ignored.
+12. Reader with no peer list loaded → sends nothing.
+18. **Extension version you can see (owner request).**
+    - Set `extension/manifest.json` `"version"` to `"0.3.0"` (0.1.0 = #31, 0.2.0 = #34 retroactively, 0.3.0 = radar).
+    - `portal-bridge.js` reports `chrome.runtime.getManifest().version`; no hard-coded `'0.1.0'` anywhere.
+    - The options page shows "DealScour extension v<version>".
+    - Web: `web/src/lib/extension.ts` exports `EXPECTED_EXTENSION_VERSION`, read at build time from `extension/manifest.json`
+      (JSON import; allow it in the Vite/TS config if needed: `web/vite.config.ts`, `web/tsconfig*.json` are allowed for this only).
+    - The header gets a small badge (`web/src/App.tsx`): "Extension 0.3.0 ✓" (green) when it matches; "Reload the extension: 0.2.0 loaded,
+      0.3.0 available" (amber, with the text "chrome://extensions") when it's older; "Extension not found" (grey) when there's no answer to the
+      ping within 1 s.
+    - Tests: the bridge test checks the version comes from the manifest; the web test renders the 3 badge states.
+
+## Round 2 (review by claude; codex findings may follow as items 24+) — same branch, same files
+19. **Ingest must be fast; process in the background.**
+    - `POST /radar/posts` only validates, dedupes and stores each post with `status="pending"` (plus the parsed (price, link) pairs). It returns
+      in well under 1 s and does no network calls.
+    - Move the work into `app/radar/process.py` (new): `process_pending_posts(session, now, *, resolver, page_fetcher, notifier,
+      limit=10) -> int`. It handles the oldest pending posts (resolve → verdict → alert) and marks each `done` with its verdict.
+    - The lead wires a lifespan loop in `app/main.py` that calls it plus `send_due_alerts` every 60 s. Leave
+      `# HOOK: radar loop (wired by lead)` in your handoff, not in main.py.
+    - Tests: ingest makes no resolver or page calls (fakes assert 0 calls); `process_pending_posts` processes up to `limit`, oldest first.
+20. **Don't fetch pages for posts that aren't about your products.** Before any page fetch, the relevance gate uses the post text **and** the words
+    in the resolved URL's slug (e.g. `/Tata-Sampann-Almonds-500g/dp/B0…`, Flipkart `/<slug>/p/itm…`). Keep the final hop URL in
+    `ResolvedLink` (`final_url`). No keyword or tracked-family match in either → `not_relevant`, **no fetch**. This applies even when the post
+    text has no product words ("Loot ₹99 : link").
+    - Daily budget for untracked page fetches: `DEALSCOUR_RADAR_MAX_PAGE_FETCHES_PER_DAY` (default 40), counted from stored verdicts. When it's
+      spent, verdict `skipped_budget` with no fetch. Tracked products still verify live (they are few).
+21. **Ignore the backlog.** Posts with `posted_at` older than `DEALSCOUR_RADAR_MAX_POST_AGE_HOURS` (default 6) are stored as `too_old` and never
+    processed. The extension also keeps a per-peer "last sent message_id" in `chrome.storage.local`, so it only sends newer ones after a reload.
+22. **Thread safety:** `LinkResolver` uses a `threading.Lock` around cache and politeness state.
+23. Tests:
+    - "Loot ₹99 : https://amzn.to/x" resolving to `/American-Tourister-Luggage/dp/…` → `not_relevant` with 0 page fetches; resolving to
+      `/Happilo-Almonds-500g/dp/…` with keyword "almonds" → fetch happens.
+    - Budget spent → `skipped_budget`, 0 fetches.
+    - A 7 h old post → `too_old`, 0 resolver calls.
+    - Extension: after a reload with stored last id 120, posts 118–121 → only 121 is sent.
+
+Bump the extension to 0.3.1 if you change `extension/` again after this round (CI checks it). Full suites 3×, commit, handoff + release.

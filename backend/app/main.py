@@ -18,12 +18,14 @@ from app.api.v1 import (
     offers,
     plans,
     prices,
+    radar,
     sources,
     watch,
 )
 from app.core.config import get_settings
 from app.core.db import get_engine
 from app.core.security import verify_csrf
+from app.radar.loop import setup_radar_loop
 from app.sources.fetcher import setup_fetcher_loop
 
 
@@ -31,9 +33,12 @@ from app.sources.fetcher import setup_fetcher_loop
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Price fetcher for Amazon/Flipkart custom listings; only when DEALSCOUR_FETCHERS=1 (ADR-004).
     stop = setup_fetcher_loop(app, get_settings(), get_engine())
+    # Deal radar: Telegram posts are processed in this loop, never in the request (DEALSCOUR_RADAR=1).
+    radar_stop = setup_radar_loop(app, get_settings(), get_engine())
     yield
-    if stop is not None:
-        stop.set()
+    for event in (stop, radar_stop):
+        if event is not None:
+            event.set()
 
 
 app = FastAPI(title="DealScour", version="0.1.0", lifespan=lifespan)
@@ -53,6 +58,7 @@ for _router in (
     sources.router,
     watch.router,
     catalog.router,
+    radar.router,
 ):
     app.include_router(_router, prefix="/api/v1", dependencies=_csrf)
 

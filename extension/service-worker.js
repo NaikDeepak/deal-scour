@@ -11,13 +11,19 @@ if (typeof importScripts === 'function') {
 }
 
 const lastOpenTimeByHost = new Map();
+const notificationUrls = new Map();
 let pendingCart = null;
 let findRunning = false;
 
 function resetWorkerStateForTests() {
   lastOpenTimeByHost.clear();
+  notificationUrls.clear();
   pendingCart = null;
   findRunning = false;
+}
+
+function registerNotificationUrlForTests(notificationId, url) {
+  notificationUrls.set(notificationId, url);
 }
 
 function isAllowedPortalSender(sender) {
@@ -33,6 +39,120 @@ function isAllowedPortalSender(sender) {
   } catch {
     return false;
   }
+}
+
+function isAllowedTelegramSender(sender) {
+  try {
+    if (!sender || !globalThis.chrome || sender.id !== globalThis.chrome.runtime.id) {
+      return false;
+    }
+    if (!sender.tab || typeof sender.tab.url !== 'string') {
+      return false;
+    }
+    const parsed = new URL(sender.tab.url);
+    return parsed.protocol === 'https:' && parsed.hostname.toLowerCase() === 'web.telegram.org';
+  } catch {
+    return false;
+  }
+}
+
+function resolveRadarApiOrigin(candidate) {
+  if (typeof candidate === 'string' && PORTAL_ORIGINS.includes(candidate)) {
+    return candidate;
+  }
+  return typeof DEALSCOUR_API_ORIGIN === 'string' ? DEALSCOUR_API_ORIGIN : 'http://localhost:8000';
+}
+
+async function syncRadarChannels() {
+  try {
+    if (!globalThis.chrome || !globalThis.chrome.storage || typeof globalThis.fetch !== 'function') {
+      return [];
+    }
+    const stored = await globalThis.chrome.storage.local.get(['radarToken', 'radarApiOrigin']);
+    const token = stored && typeof stored.radarToken === 'string' ? stored.radarToken.trim() : '';
+    if (!token) return [];
+    const apiOrigin = resolveRadarApiOrigin(stored && stored.radarApiOrigin);
+    const resp = await globalThis.fetch(`${apiOrigin}/api/v1/radar/channels`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!resp || !resp.ok) return [];
+    const data = await resp.json();
+    const peerIds = Array.isArray(data && data.peer_ids)
+      ? data.peer_ids
+      : Array.isArray(data && data.channels)
+        ? data.channels.filter((c) => c && c.enabled).map((c) => String(c.peer_id))
+        : [];
+    await globalThis.chrome.storage.local.set({ radarAllowedPeers: peerIds });
+    return peerIds;
+  } catch {
+    return [];
+  }
+}
+
+async function pollRadarAlerts() {
+  try {
+    if (!globalThis.chrome || !globalThis.chrome.storage || typeof globalThis.fetch !== 'function') {
+      return;
+    }
+    const stored = await globalThis.chrome.storage.local.get([
+      'radarToken',
+      'radarApiOrigin',
+      'radarLastAlertId',
+    ]);
+    const token = stored && typeof stored.radarToken === 'string' ? stored.radarToken.trim() : '';
+    if (!token) return;
+    const apiOrigin = resolveRadarApiOrigin(stored && stored.radarApiOrigin);
+    const sinceParam =
+      stored && stored.radarLastAlertId ? `?since=${encodeURIComponent(String(stored.radarLastAlertId))}` : '';
+    const resp = await globalThis.fetch(`${apiOrigin}/api/v1/radar/alerts${sinceParam}`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!resp || !resp.ok) return;
+    const data = await resp.json();
+    const alerts = Array.isArray(data && data.alerts) ? data.alerts : [];
+    let maxId = stored && typeof stored.radarLastAlertId === 'number' ? stored.radarLastAlertId : 0;
+
+    for (const alert of alerts) {
+      if (!alert || typeof alert.url !== 'string') continue;
+      if (typeof alert.id === 'number' && alert.id > maxId) {
+        maxId = alert.id;
+      }
+      if (!isAllowedUrl(alert.url) || !isProductPageUrl(alert.url)) {
+        continue;
+      }
+      const notifId = `dealscour-alert-${alert.id || Date.now()}`;
+      notificationUrls.set(notifId, alert.url);
+      if (globalThis.chrome.notifications && typeof globalThis.chrome.notifications.create === 'function') {
+        const rupees = Math.round((Number(alert.price_paise) || 0) / 100);
+        await globalThis.chrome.notifications.create(notifId, {
+          type: 'basic',
+          iconUrl: 'icon.png',
+          title: `DealScour: ₹${rupees} — ${alert.title || 'Deal Alert'}`,
+          message: Array.isArray(alert.reasons) ? alert.reasons.join(', ') : 'Tap to open product page',
+        });
+      }
+    }
+
+    if (maxId > 0) {
+      await globalThis.chrome.storage.local.set({ radarLastAlertId: maxId });
+    }
+  } catch {
+    // ignore polling errors
+  }
+}
+
+async function handleNotificationClicked(notificationId) {
+  const url = notificationUrls.get(notificationId);
+  if (!url || !isAllowedUrl(url) || !isProductPageUrl(url)) {
+    return false;
+  }
+  if (globalThis.chrome && globalThis.chrome.tabs && typeof globalThis.chrome.tabs.create === 'function') {
+    await globalThis.chrome.tabs.create({ url, active: true });
+    return true;
+  }
+  return false;
 }
 
 async function sleep(ms) {
@@ -519,6 +639,70 @@ function handleRuntimeMessage(message, sender, sendResponse) {
     return true;
   }
 
+  if (message.type === 'DEALSCOUR_SET_RADAR_TOKEN') {
+    if (!isAllowedPortalSender(sender)) {
+      return false;
+    }
+    const token = typeof message.token === 'string' ? message.token.trim() : '';
+    if (!token) {
+      sendResponse({ ok: false, error: 'Empty token' });
+      return true;
+    }
+    const apiOrigin = resolveRadarApiOrigin(DEALSCOUR_API_ORIGIN);
+    (async () => {
+      try {
+        await globalThis.chrome.storage.local.set({
+          radarToken: token,
+          radarApiOrigin: apiOrigin,
+        });
+        if (globalThis.chrome.alarms && typeof globalThis.chrome.alarms.create === 'function') {
+          globalThis.chrome.alarms.create('dealscour-radar-poll', { periodInMinutes: 2 });
+        }
+        await syncRadarChannels();
+        sendResponse({ ok: true });
+      } catch (err) {
+        sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) });
+      }
+    })();
+    return true;
+  }
+
+  if (message.type === 'DEALSCOUR_RADAR_POSTS') {
+    if (!isAllowedTelegramSender(sender)) {
+      return false;
+    }
+    (async () => {
+      try {
+        const stored = await globalThis.chrome.storage.local.get(['radarToken', 'radarApiOrigin']);
+        const token = stored && typeof stored.radarToken === 'string' ? stored.radarToken.trim() : '';
+        if (!token) {
+          sendResponse({ ok: false, error: 'Radar token not configured' });
+          return;
+        }
+        const apiOrigin = resolveRadarApiOrigin(stored && stored.radarApiOrigin);
+        const posts = Array.isArray(message.posts) ? message.posts.slice(0, 50) : [];
+        const resp = await globalThis.fetch(`${apiOrigin}/api/v1/radar/posts`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-DealScour': '1',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ posts }),
+        });
+        if (!resp || !resp.ok) {
+          sendResponse({ ok: false, status: resp ? resp.status : 0 });
+          return;
+        }
+        const data = await resp.json();
+        sendResponse({ ok: true, ...data });
+      } catch (err) {
+        sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) });
+      }
+    })();
+    return true;
+  }
+
   return false;
 }
 
@@ -530,6 +714,21 @@ if (typeof chrome !== 'undefined' && chrome.windows && chrome.windows.onRemoved)
   });
 }
 
+if (typeof chrome !== 'undefined' && chrome.alarms && chrome.alarms.onAlarm) {
+  chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm && alarm.name === 'dealscour-radar-poll') {
+      void syncRadarChannels();
+      void pollRadarAlerts();
+    }
+  });
+}
+
+if (typeof chrome !== 'undefined' && chrome.notifications && chrome.notifications.onClicked) {
+  chrome.notifications.onClicked.addListener((notificationId) => {
+    void handleNotificationClicked(notificationId);
+  });
+}
+
 if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
   chrome.runtime.onMessage.addListener(handleRuntimeMessage);
 }
@@ -537,8 +736,13 @@ if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage)
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     handleRuntimeMessage,
+    handleNotificationClicked,
+    registerNotificationUrlForTests,
+    syncRadarChannels,
+    pollRadarAlerts,
     waitForTabComplete,
     isAllowedPortalSender,
+    isAllowedTelegramSender,
     resetWorkerStateForTests,
   };
 }

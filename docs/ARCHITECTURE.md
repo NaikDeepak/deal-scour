@@ -138,6 +138,10 @@ erDiagram
 | `notification` | id, user_id, kind, dedupe_key UNIQUE, payload, channel, sent_at |
 | `job_run` | job, started_at, finished_at, status, stats JSON (lock and audit) |
 | `listing_watch` (built) | id, household_id, listing_id, target_paise?, created_at · UNIQUE(household_id, listing_id). Phase-1 form of `watch`: one listing, optional target |
+| `radar_channel`, `radar_keyword` (built) | household_id, peer_id, name, enabled · household_id, keyword |
+| `radar_post` (built) | household_id, peer_id, message_id (unique per household+peer), text ≤ 2,000, posted_at, status (`pending`/`done`/`too_old`), pairs_json, verdict, reasons_json, platform?, sku?, live/posted paise, page_fetches |
+| `radar_alert` (built) | household_id, post_id?, product_key, platform, sku, title, url, price_paise, reasons_json, telegram_status (`sent`/`held`/`skipped`/`failed`), scheduled_for?, sent_at? |
+| `radar_extension_token` (built) | household_id, token_hash (SHA-256), created_at, last_used_at?, revoked |
 | `catalog_product` (built) | id, household_id, seed_product_id, name, brand, category, family_key, pack_label, suggested_url? · UNIQUE(household_id, seed_product_id). A pick list imported from CSV (`python -m app.jobs.import_catalog <csv> --household N`); no prices |
 | `llm_usage` (built) | id, household_id?, provider, model, prompt_tokens, response_tokens, total_tokens, cost_paise, created_at. The monthly LLM cap sums this across all households |
 
