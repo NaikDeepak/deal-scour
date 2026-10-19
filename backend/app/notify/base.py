@@ -1,7 +1,8 @@
 import json
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
+from zoneinfo import ZoneInfo
 
 from sqlmodel import Session, select
 
@@ -47,20 +48,26 @@ def format_alert_text(alert: AlertPayload) -> str:
     return f"DealScour Alert: {alert.title}\nPrice: {price_str}\nWhy: {why_str}\n{alert.url}"
 
 
+# Quiet hours are the owner's local hours (Pune), not UTC.
+LOCAL_TZ = ZoneInfo("Asia/Kolkata")
+
+
 def is_quiet_hours(now_dt: datetime, quiet_start: int = 23, quiet_end: int = 7) -> bool:
     if quiet_start == quiet_end:
         return False
-    h = now_dt.hour
+    h = to_utc(now_dt).astimezone(LOCAL_TZ).hour
     if quiet_start > quiet_end:
         return h >= quiet_start or h < quiet_end
     return quiet_start <= h < quiet_end
 
 
 def next_quiet_hours_end(now_dt: datetime, quiet_start: int = 23, quiet_end: int = 7) -> datetime:
-    if now_dt.hour >= quiet_start and quiet_start > quiet_end:
-        next_day = now_dt + timedelta(days=1)
-        return next_day.replace(hour=quiet_end, minute=0, second=0, microsecond=0)
-    return now_dt.replace(hour=quiet_end, minute=0, second=0, microsecond=0)
+    """When held alerts may go out: the next quiet_end o'clock in local time, returned in UTC."""
+    local = to_utc(now_dt).astimezone(LOCAL_TZ)
+    end = local.replace(hour=quiet_end, minute=0, second=0, microsecond=0)
+    if local.hour >= quiet_start and quiet_start > quiet_end:
+        end += timedelta(days=1)
+    return end.astimezone(UTC)
 
 
 def record_and_dispatch_alert(

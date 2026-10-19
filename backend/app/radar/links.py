@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Literal
-from urllib.parse import parse_qs, urljoin, urlparse
+from urllib.parse import ParseResult, parse_qs, urljoin, urlparse
 
 from app.domain.catalog import to_utc
 from app.sources.fetcher import DEFAULT_USER_AGENT
@@ -55,12 +55,23 @@ class ResolvedLink:
     final_url: str | None = None
 
 
+def _is_plain_https(parsed: ParseResult) -> bool:
+    """https only, no user:pass@, and no port other than 443 (links come from untrusted Telegram posts)."""
+    if parsed.scheme.lower() != "https" or parsed.username is not None or parsed.password is not None:
+        return False
+    try:
+        port = parsed.port
+    except ValueError:
+        return False
+    return port in (None, 443)
+
+
 def _is_short_link(url: str) -> bool:
     try:
         parsed = urlparse(url.strip())
     except ValueError:
         return False
-    if parsed.scheme.lower() != "https":
+    if not _is_plain_https(parsed):
         return False
     host = (parsed.hostname or "").lower()
     if host in SHORT_LINK_HOSTS:
@@ -73,7 +84,7 @@ def _is_allowed_hop_url(url: str) -> bool:
         parsed = urlparse(url.strip())
     except ValueError:
         return False
-    if parsed.scheme.lower() != "https":
+    if not _is_plain_https(parsed):
         return False
     host = (parsed.hostname or "").lower()
     return host in SHORT_LINK_HOSTS or host in PRODUCT_HOSTS
@@ -85,7 +96,7 @@ def _try_parse_direct_product(url: str) -> ProductRef | None:
         parsed = urlparse(url.strip())
     except ValueError:
         return None
-    if parsed.scheme.lower() != "https":
+    if not _is_plain_https(parsed):
         return None
     host = (parsed.hostname or "").lower()
     if host not in PRODUCT_HOSTS:

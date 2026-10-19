@@ -685,6 +685,7 @@ function handleRuntimeMessage(message, sender, sendResponse) {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            'X-DealScour': '1',
             Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({ posts }),

@@ -18,6 +18,7 @@ class Settings:
     smtp_password: str = ""
     smtp_from: str = ""
     fetchers_enabled: bool = False
+    radar_enabled: bool = False
     fetch_interval_hours: int = 6
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3.8-flash"
@@ -74,6 +75,7 @@ class Settings:
         smtp_from = os.environ.get("SMTP_FROM", "")
 
         fetchers_enabled = os.environ.get("DEALSCOUR_FETCHERS") == "1"
+        radar_enabled = os.environ.get("DEALSCOUR_RADAR") == "1"
         fetch_interval_raw = os.environ.get("DEALSCOUR_FETCH_INTERVAL_HOURS", "6")
         try:
             fetch_interval_hours = max(2, int(fetch_interval_raw))
@@ -137,6 +139,7 @@ class Settings:
             smtp_password=smtp_password,
             smtp_from=smtp_from,
             fetchers_enabled=fetchers_enabled,
+            radar_enabled=radar_enabled,
             fetch_interval_hours=fetch_interval_hours,
             gemini_api_key=gemini_api_key,
             gemini_model=gemini_model,

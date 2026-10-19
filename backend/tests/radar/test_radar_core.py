@@ -448,8 +448,8 @@ def test_case_6_alerts_dedupe_quiet_hours_daily_cap_and_secret_safety(
     assert a1_dup is None
     assert len(sent_requests) == 1
 
-    # 6c. Quiet hours (23:30) -> held until 07:00, then sent by send_due_alerts at 07:00
-    quiet_time = datetime(2026, 10, 19, 23, 30, 0, tzinfo=UTC)
+    # 6c. Quiet hours are India time: 23:30 IST (18:00 UTC) -> held until 07:00 IST (01:30 UTC), then sent
+    quiet_time = datetime(2026, 10, 19, 18, 0, 0, tzinfo=UTC)
     a_quiet = record_and_dispatch_alert(
         session=session,
         household_id=1,
@@ -465,22 +465,22 @@ def test_case_6_alerts_dedupe_quiet_hours_daily_cap_and_secret_safety(
     )
     assert a_quiet is not None
     assert a_quiet.telegram_status == "held"
-    assert a_quiet.scheduled_for == datetime(2026, 10, 20, 7, 0, 0, tzinfo=UTC)
+    assert a_quiet.scheduled_for == datetime(2026, 10, 20, 1, 30, 0, tzinfo=UTC)
     assert len(sent_requests) == 1  # Not sent yet!
 
-    # Before 07:00 -> still held
+    # Before 07:00 IST -> still held
     flushed_early = send_due_alerts(
         session,
-        datetime(2026, 10, 20, 6, 59, 0, tzinfo=UTC),
+        datetime(2026, 10, 20, 1, 29, 0, tzinfo=UTC),
         notifier,
     )
     assert flushed_early == 0
     assert len(sent_requests) == 1
 
-    # At 07:00 -> sent!
+    # At 07:00 IST -> sent!
     flushed_7am = send_due_alerts(
         session,
-        datetime(2026, 10, 20, 7, 0, 0, tzinfo=UTC),
+        datetime(2026, 10, 20, 1, 30, 0, tzinfo=UTC),
         notifier,
     )
     assert flushed_7am == 1

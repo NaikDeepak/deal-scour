@@ -235,6 +235,8 @@ describe('Case 8 & 11: service-worker.js radar sender checks and notification cl
     assert.ok(fetchCalls.length >= 1);
     assert.equal(fetchCalls[0].url, 'http://localhost:8000/api/v1/radar/posts');
     assert.equal(fetchCalls[0].init.headers.Authorization, 'Bearer fresh-portal-token');
+    // The server's CSRF check applies to every POST under /api/v1, bearer or not.
+    assert.equal(fetchCalls[0].init.headers['X-DealScour'], '1');
 
     // 5. Case 8 & 16: Notification click opens the product url ONLY if isAllowedUrl && isProductPageUrl
     registerNotificationUrlForTests('notif-good', 'https://www.amazon.in/dp/B072HG4WNC');
@@ -252,11 +254,11 @@ describe('Case 8 & 11: service-worker.js radar sender checks and notification cl
 });
 
 describe('Case 18: visible extension version in manifest, portal-bridge, and options', () => {
-  it('reports chrome.runtime.getManifest().version (0.3.1) with no hard-coded 0.1.0 and shows it in options', async () => {
+  it('reports chrome.runtime.getManifest().version with no hard-coded version and shows it in options', async () => {
     const fs = require('node:fs');
     const path = require('node:path');
     const manifest = require('../manifest.json');
-    assert.equal(manifest.version, '0.3.1');
+    assert.match(manifest.version, /^\d+\.\d+\.\d+$/);
 
     const bridgePath = path.join(__dirname, '..', 'portal-bridge.js');
     const bridgeSrc = fs.readFileSync(bridgePath, 'utf8');
