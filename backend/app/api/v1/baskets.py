@@ -18,7 +18,7 @@ from app.api.v1.plans import (
 from app.core import clock
 from app.core.db import current_household_id, get_session
 from app.core.money import Paise
-from app.domain.catalog import current_listings
+from app.domain.catalog import all_listings, current_listings
 from app.domain.models import Basket, BasketLine, Need, PlanRun, ShoppingList
 from app.domain.models import Offer as OfferModel
 from app.pricing.fee_schedules import Platform
@@ -40,6 +40,8 @@ class PlanListRequest(BaseModel):
 
 class PlanRunResponse(PlansResponse):
     plan_run_id: int
+    # Needs left out because nothing in the catalog matches them yet.
+    no_prices: list[str] = Field(default_factory=list)
 
 
 class AcceptPlanRequest(BaseModel):
@@ -167,9 +169,31 @@ def plan_list(
             detail="No open needs on this shopping list",
         )
 
+    # Skip needs with no listing at all, so one unpriced item doesn't block the plan.
+    catalog = all_listings(session=session, household_id=household_id)
+    known_products = {item.product_key for item in catalog}
+    known_families = {item.family_key for item in catalog}
+    no_prices: list[str] = []
+    priced_needs: list[Need] = []
+    for n in open_needs:
+        if n.product_key is not None:
+            known = n.product_key in known_products
+        else:
+            known = n.family_key in known_families
+        if known:
+            priced_needs.append(n)
+        else:
+            no_prices.append(n.product_key or n.family_key or n.line_id)
+    if not priced_needs:
+        names = ", ".join(key.replace("_", " ") for key in no_prices)
+        raise HTTPException(
+            status_code=422,
+            detail=f"No prices yet for: {names}. Add a product link on the Prices tab.",
+        )
+
     valid_platforms: set[str] = {"amazon", "flipkart", "blinkit", "instamart", "zepto"}
     needs_in: list[NeedIn] = []
-    for n in open_needs:
+    for n in priced_needs:
         lock_plat: Platform | None = (
             n.lock_platform if n.lock_platform in valid_platforms else None  # type: ignore[assignment]
         )
@@ -251,6 +275,7 @@ def plan_list(
         plan_run_id=plan_run.id or 0,
         baseline=plans_resp.baseline,
         plans=plans_resp.plans,
+        no_prices=no_prices,
     )
 
 

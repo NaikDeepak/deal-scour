@@ -49,7 +49,7 @@ export default function PlansPage({ onAccepted }: { onAccepted: () => void }) {
   const [listId, setListId] = usePreference<number | null>('listId', null)
   const [lists, setLists] = useState<ListSummary[]>([])
   const [list, setList] = useState<ListDetail | null>(null)
-  const [result, setResult] = useState<(PlanSetOut & { plan_run_id: number }) | null>(null)
+  const [result, setResult] = useState<(PlanSetOut & { plan_run_id: number; no_prices: string[] }) | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
@@ -203,7 +203,7 @@ export default function PlansPage({ onAccepted }: { onAccepted: () => void }) {
       await Promise.all([loadList(), loadLists()])
       await executePlan(listId)
       if (bundleRes.unpriced_families && bundleRes.unpriced_families.length > 0) {
-        setScourNote(`Added bundle needs. Add a product link for: ${bundleRes.unpriced_families.join(', ')}.`)
+        setScourNote('Added the dry fruits and seeds. Planned the ones that have prices.')
       } else {
         setScourNote('Loaded all 8 Dryfruits & Seeds (500g each) and calculated optimal split!')
       }
@@ -437,6 +437,12 @@ export default function PlansPage({ onAccepted }: { onAccepted: () => void }) {
       </div>
 
       {scourNote && <p className="rounded-xl bg-slate-100 px-3 py-2 text-xs text-slate-700">{scourNote}</p>}
+      {result && result.no_prices.length > 0 && (
+        <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          No prices yet for: {result.no_prices.map((key) => key.replace(/_/g, ' ')).join(', ')}. Add a product link on the Prices tab
+          to include them.
+        </p>
+      )}
 
       {pendingConfirmations.length > 0 && (
         <Card>

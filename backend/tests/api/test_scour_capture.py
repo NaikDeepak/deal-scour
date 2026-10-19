@@ -263,3 +263,42 @@ def test_list_scour_targets_returns_candidate_listings_for_open_needs(
 
     missing = scour_client.get("/api/v1/lists/99999/scour-targets")
     assert missing.status_code == 404
+
+
+def test_list_plan_skips_needs_with_no_listing(
+    scour_client: TestClient,
+) -> None:
+    # A bundle family with no listing must not fail the whole plan: the rest is planned
+    # and the missing families come back in no_prices.
+    list_id = scour_client.post(
+        "/api/v1/lists", json={"name": "Dryfruits", "kind": "monthly"}
+    ).json()["id"]
+    assert scour_client.post(
+        f"/api/v1/lists/{list_id}/quick-bundle", json={"bundle": "dryfruits_500g"}
+    ).status_code == 200
+
+    resp = scour_client.post(f"/api/v1/lists/{list_id}/plan", json={})
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert sorted(data["no_prices"]) == [
+        "chia_seeds", "dates", "flax_seeds", "pumpkin_seeds", "sunflower_seeds",
+    ]
+    assert data["plans"]
+
+
+def test_list_plan_with_only_unknown_needs_says_what_to_add(
+    scour_client: TestClient,
+    engine: Engine,
+) -> None:
+    list_id = scour_client.post(
+        "/api/v1/lists", json={"name": "Seeds", "kind": "monthly"}
+    ).json()["id"]
+    with Session(engine) as s:
+        s.add(Need(
+            list_id=list_id, line_id="chia", family_key="chia_seeds", quantity="500g", qty=1, status="open",
+        ))
+        s.commit()
+
+    resp = scour_client.post(f"/api/v1/lists/{list_id}/plan", json={})
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == "No prices yet for: chia seeds. Add a product link on the Prices tab."
