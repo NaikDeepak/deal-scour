@@ -279,3 +279,36 @@ class SourceStatus(SQLModel, table=True):
     last_error: str | None = Field(default=None, max_length=200)
 
 
+class ListingWatch(SQLModel, table=True):
+    __tablename__ = "listing_watch"
+    __table_args__ = (
+        UniqueConstraint("household_id", "listing_id", name="uq_listing_watch_household_listing"),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    household_id: int = Field(foreign_key="household.id", index=True)
+    listing_id: str = Field(index=True)
+    target_paise: int | None = Field(default=None)
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC)
+    )
+
+
+class LlmUsage(SQLModel, table=True):
+    __tablename__ = "llm_usage"
+
+    id: int | None = Field(default=None, primary_key=True)
+    household_id: int | None = Field(default=None, foreign_key="household.id", index=True)
+    provider: str = Field(default="gemini")
+    model: str = Field(default="gemini-3.8-flash")
+    prompt_tokens: int = Field(default=0)
+    response_tokens: int = Field(default=0)
+    total_tokens: int = Field(default=0)
+    cost_paise: int = Field(default=0)
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        index=True,
+    )
+
+
+

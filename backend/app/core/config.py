@@ -19,6 +19,9 @@ class Settings:
     smtp_from: str = ""
     fetchers_enabled: bool = False
     fetch_interval_hours: int = 6
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-3.8-flash"
+    llm_monthly_cap_paise: int = 10000
 
     @property
     def db_url(self) -> str:
@@ -70,6 +73,16 @@ class Settings:
         except ValueError:
             fetch_interval_hours = 6
 
+        gemini_api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+        gemini_model = (
+            os.environ.get("DEALSCOUR_GEMINI_MODEL", "gemini-3.8-flash").strip() or "gemini-3.8-flash"
+        )
+        llm_cap_raw = os.environ.get("DEALSCOUR_LLM_MONTHLY_CAP_RUPEES", "100")
+        try:
+            llm_monthly_cap_paise = max(0, int(llm_cap_raw) * 100)
+        except ValueError:
+            llm_monthly_cap_paise = 10000
+
         static = os.environ.get("DEALSCOUR_STATIC_DIR")
         return cls(
             db_path=db_path_from_env(),
@@ -85,6 +98,9 @@ class Settings:
             smtp_from=smtp_from,
             fetchers_enabled=fetchers_enabled,
             fetch_interval_hours=fetch_interval_hours,
+            gemini_api_key=gemini_api_key,
+            gemini_model=gemini_model,
+            llm_monthly_cap_paise=llm_monthly_cap_paise,
         )
 
 
