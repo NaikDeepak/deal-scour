@@ -108,3 +108,13 @@ Extra test cases:
     cookie alone on `/radar/posts` → 401.
 11. Worker: `DEALSCOUR_RADAR_POSTS` from a non-telegram tab → ignored; `DEALSCOUR_SET_RADAR_TOKEN` from a non-portal origin → ignored.
 12. Reader with no peer list loaded → sends nothing.
+18. **Extension version you can see (owner request).**
+    - Set `extension/manifest.json` `"version"` to `"0.3.0"` (0.1.0 = #31, 0.2.0 = #34 retroactively, 0.3.0 = radar).
+    - `portal-bridge.js` reports `chrome.runtime.getManifest().version`; no hard-coded `'0.1.0'` anywhere.
+    - The options page shows "DealScour extension v<version>".
+    - Web: `web/src/lib/extension.ts` exports `EXPECTED_EXTENSION_VERSION`, read at build time from `extension/manifest.json`
+      (JSON import; allow it in the Vite/TS config if needed: `web/vite.config.ts`, `web/tsconfig*.json` are allowed for this only).
+    - The header gets a small badge (`web/src/App.tsx`): "Extension 0.3.0 ✓" (green) when it matches; "Reload the extension: 0.2.0 loaded,
+      0.3.0 available" (amber, with the text "chrome://extensions") when it's older; "Extension not found" (grey) when there's no answer to the
+      ping within 1 s.
+    - Tests: the bridge test checks the version comes from the manifest; the web test renders the 3 badge states.
