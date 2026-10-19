@@ -68,3 +68,32 @@ works using the rule-based path. No new Python deps: call the Gemini REST API wi
 ## Don'ts
 No new dependencies. No Gemini calls in tests. Don't fetch quick-commerce sites. Don't edit `app/main.py` (lead wires the router). No inline `python -c`.
 One command per call, foreground only.
+
+## Round 2 (review by claude + codex) — same branch, same file list plus `web/src/lib/money.ts` (+ its test)
+12. **Polite autofill fetches.** Keep a module-level "last fetch" time shared by the fetcher run and autofill: an autofill fetch waits until
+    ≥ 10 s after the previous fetch (injectable `sleep`/clock for tests). Take `_RUN_LOCK` with `acquire(timeout=5)`; if a refresh run holds it,
+    422 "Prices are refreshing. Try again in a few minutes." — never hang.
+13. **Bulk: per-row results.** `POST /listings/bulk` returns `{results: [{url, suggestion | null, error | null}]}`; one bad link marks its row, the
+    rest still fill. Web table shows the error on that row. Show "About 10 s per link" next to the button.
+14. **`low_30d` only when the price moved:** current ≤ 30-day low **and** ≥ 3 observations **and** the 30-day high > the low. A flat price is not a deal.
+15. **Integer money only:** averages as `(sum + n // 2) // n`; under-average test as `current * 100 <= avg * 85`. No `/` or `*0.85` on paise
+    (history and feed). `saving_pct` may stay a float (it's a percentage, not money).
+16. **Gemini cap is global and reserved before the call:** sum spend for the month across all households (it's the owner's key). Proceed only if
+    `spent + MAX_CALL_COST_PAISE <= cap` (constant, e.g. 10 paise; titles are short), under a module `threading.Lock` held across check → call →
+    usage write, so two requests can't both pass.
+17. **No response contents in logs:** on JSON/validation failure log only "Gemini output was not valid JSON" (no exception text).
+18. **Watch only real listings:** `PUT /listings/{id}/watch` → 404 unless `id` is a seed listing or one of this household's non-archived custom listings.
+19. **Web money helper:** add `paiseToRupeesInput(paise): string` to `web/src/lib/money.ts` (e.g. 64950 → "649.50", 65000 → "650") with a test; use it
+    instead of `/ 100` in AddProduct and PriceHistory.
+
+Test cases (write first):
+20. Two autofills in a row: the second sleeps the remaining gap (fake clock). Lock held by a run → 422 with that message, returns within the timeout.
+21. Bulk with 1 bad + 2 good urls → 200, 3 results, the bad one has `error`.
+22. Flat price ×3 → no `low_30d`; 300, 320, 290 (current 290) → `low_30d`.
+23. avg of [100, 101] paise = 101 (integer rounding half up); 85.0% exactly under → `under_avg`.
+24. Spend 9,995 with cap 10,000 → Gemini not called. Spend from household 2 counts for household 1.
+25. Fake Gemini returns `{"brand": <the key>, "pack_label": 5}` (invalid) → caplog never contains the key.
+26. PUT watch on "nope" → 404; on another household's custom listing → 404.
+27. `paiseToRupeesInput` cases.
+
+Rebased on main (includes #32). Run full suites 3×, commit on feat/staples-tracker, handoff + release.
