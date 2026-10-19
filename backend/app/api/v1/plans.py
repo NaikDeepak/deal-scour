@@ -105,6 +105,7 @@ class OrderLineOut(BaseModel):
     is_filler: bool
     price_source: str
     freshness: str
+    url: str = ""
 
 
 class OrderOut(BaseModel):
@@ -191,6 +192,7 @@ def _build_plan_out(
                     is_filler=is_filler,
                     price_source=cur.source,
                     freshness=cur.freshness,
+                    url=listing.url,
                 )
             )
 

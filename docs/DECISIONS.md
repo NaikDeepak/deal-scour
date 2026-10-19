@@ -218,3 +218,20 @@ crack). Reviews (lead + codex) also found races on owner bootstrap, invite redem
 failed-attempt budget. At personal scale that's an annoyance, not a breach. Mitigation later: per-IP throttling (needs trusted proxy headers
 from Caddy) and an owner-side "unlock" action.
 
+
+### ADR-025 · Browser extension: read prices and add to cart in the user's own browser
+*2026-10-19 · Accepted · amends ADR-020, details ADR-004*
+**Context.** Blinkit, Zepto and Instamart block server-side fetching (403 or a bot check), so their prices were manual only. The user also
+wants fewer clicks from a plan to a filled cart. A Chrome extension runs in the user's own signed-in browser, the same way they browse by hand.
+**Decision.**
+- The extension is optional and loaded unpacked from `extension/`. It talks only to the DealScour page it is injected into (localhost).
+- **Price capture:** it opens the household's product links in background tabs, sequentially, at most 15 per run and ≥ 8 s apart per site, and
+  saves a `price_observation` with `source = "extension"`. It saves a price only from Amazon's price elements or a page's JSON-LD `Product` data;
+  no "first ₹ on the page" guessing. A price more than 60% off the last one needs the user to confirm.
+- **Add to cart:** only after the user clicks "Add N items" in the extension's own confirmation window (bound to that one request). On product pages only, and only when the landed page is the same product, it clicks the platform's add-to-cart control, or a single unambiguous "Add" button, and stops.
+  It never clicks Buy now, Checkout, Place order or Pay, never enters credentials and never stores cookies. Search pages are opened for the
+  user to choose. **The human still checks out** (ADR-020 otherwise unchanged).
+- Only the five shops' exact hosts are opened or scripted. No CAPTCHA solving, no proxies, no hidden automation beyond normal page loads.
+- One-click bundles add **needs** to a list, never listings, prices or offers. Invented prices and offers are never stored (invariants 6 and 7).
+**Consequences.** Quick-commerce prices can be fresh without server scraping. Adding to cart acts inside the user's accounts, so selectors
+must fail closed (leave the tab open) rather than guess. Site layout changes break capture silently, which shows up as stale prices, not wrong ones.

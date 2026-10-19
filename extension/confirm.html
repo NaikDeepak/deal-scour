@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Confirm Add to Cart — DealScour</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      margin: 0;
+      padding: 16px;
+      background: #f8fafc;
+      color: #0f172a;
+    }
+    h1 {
+      font-size: 16px;
+      font-weight: 800;
+      margin: 0 0 4px 0;
+    }
+    p.subtitle {
+      font-size: 12px;
+      color: #64748b;
+      margin: 0 0 16px 0;
+    }
+    .item-list {
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 8px 12px;
+      max-height: 280px;
+      overflow-y: auto;
+      margin-bottom: 16px;
+    }
+    .item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 0;
+      border-bottom: 1px solid #f1f5f9;
+      font-size: 12px;
+      gap: 8px;
+    }
+    .item:last-child {
+      border-bottom: none;
+    }
+    .item-title {
+      font-weight: 600;
+      color: #334155;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+    }
+    .item-badge {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: #e2e8f0;
+      color: #475569;
+    }
+    .item-packs {
+      font-weight: 700;
+      color: #0f172a;
+      white-space: nowrap;
+    }
+    .actions {
+      display: flex;
+      gap: 8px;
+    }
+    button {
+      flex: 1;
+      padding: 10px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      border: none;
+    }
+    button.primary {
+      background: #0f172a;
+      color: #ffffff;
+    }
+    button.primary:hover {
+      background: #1e293b;
+    }
+    button.secondary {
+      background: #ffffff;
+      color: #64748b;
+      border: 1px solid #cbd5e1;
+    }
+    button.secondary:hover {
+      background: #f1f5f9;
+    }
+  </style>
+</head>
+<body>
+  <h1>Confirm Add to Cart</h1>
+  <p class="subtitle">DealScour will open product tabs and click Add to Cart.</p>
+  <div class="item-list" id="itemList">Loading items…</div>
+  <div class="actions">
+    <button type="button" class="secondary" id="cancelBtn">Cancel</button>
+    <button type="button" class="primary" id="confirmBtn">Add items</button>
+  </div>
+  <script src="confirm.js"></script>
+</body>
+</html>

@@ -196,6 +196,12 @@ flowchart TD
   M["Manual / link / extension capture"] --> V
 ```
 
+**Browser extension (optional, ADR-025).** Plans → "Check live prices and plan" sends the list's product links to the extension. It opens each one in a
+background tab (≤ 15 per run, ≥ 8 s apart per shop), reads the price only from Amazon's price block or the page's JSON-LD, and posts it to
+`POST /prices/capture` (`source = "extension"`). A price more than 60% off the last one is listed under "Check these prices" for the user to
+confirm or skip; the rest carry on. "Add to cart" on a ready basket opens the extension's confirmation window; after "Add N items" it opens each
+product page, clicks add-to-cart once if the page is that product, and leaves the last tab on the shop for the human to check out.
+
 ## 9. Post-order reconciliation & savings ledger
 
 ```mermaid

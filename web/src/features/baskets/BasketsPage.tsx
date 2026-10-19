@@ -4,6 +4,7 @@ import { formatINR, parseRupees } from '../../lib/money'
 import { usePreference } from '../../lib/preference'
 import { useProducts } from '../../lib/products'
 import { Card, ErrorNote, inputClass, SectionTitle } from '../../lib/ui'
+import { buildCartItemsFromBasket, triggerAddToCart, type CartItemResult } from '../plans/cartBuilder'
 
 const GROUPS: { status: BasketStatus; title: string; hint: string }[] = [
   { status: 'pending', title: 'Pending: waiting for top-up', hint: 'Short of an offer threshold. Add things you need anyway, or place it without the offer.' },
@@ -94,6 +95,8 @@ function BasketCard({
   const meta = PLATFORM_META[b.platform]
   const subtotal = b.lines.reduce((s, l) => s + l.line_total_paise, 0)
   const [amount, setAmount] = useState('')
+  const [cartResults, setCartResults] = useState<CartItemResult[]>([])
+  const [isAdding, setIsAdding] = useState(false)
   const sameStore = useMemo(() => deals.filter((d) => d.platform === b.platform), [deals, b.platform])
   const storeUrl = sameStore[0]?.url
 
@@ -176,6 +179,45 @@ function BasketCard({
 
         {b.status === 'ready' && (
           <>
+            <button
+              type="button"
+              disabled={isAdding}
+              onClick={async () => {
+                const extInstalled =
+                  typeof document !== 'undefined' &&
+                  document.documentElement.getAttribute('data-dealscour-extension') === 'installed'
+                setIsAdding(true)
+                try {
+                  const res = await triggerAddToCart(buildCartItemsFromBasket(b, deals), extInstalled)
+                  setCartResults(res)
+                } finally {
+                  setIsAdding(false)
+                }
+              }}
+              className="block w-full rounded-lg bg-emerald-700 py-2 text-center text-xs font-bold text-white hover:bg-emerald-800 disabled:opacity-50"
+            >
+              {isAdding ? `Adding to ${meta.name} cart…` : `Add to ${meta.name} cart`}
+            </button>
+            {cartResults.length > 0 && (
+              <ul className="space-y-1 rounded-lg bg-slate-50 p-2 text-xs">
+                {cartResults.map((res, idx) => (
+                  <li key={idx} className="flex items-center justify-between gap-2">
+                    <span className="truncate text-slate-700">{res.title}</span>
+                    <span
+                      className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${
+                        res.status === 'added'
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : res.status === 'opened for you'
+                            ? 'bg-sky-100 text-sky-800'
+                            : 'bg-rose-100 text-rose-800'
+                      }`}
+                    >
+                      {res.status}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
             {storeUrl && (
               <a href={storeUrl} target="_blank" rel="noopener noreferrer" className="block rounded-lg bg-slate-100 py-1.5 text-center text-xs font-bold">
                 Open {meta.name} ↗
