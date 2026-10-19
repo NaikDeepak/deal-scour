@@ -289,7 +289,7 @@ export const api = {
     call<SavedNeed>(`/api/v1/needs/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   dropNeed: (id: number) => call<SavedNeed>(`/api/v1/needs/${id}`, { method: 'DELETE' }),
   planList: (listId: number, members: Platform[], fillers: FillerIn[]) =>
-    call<PlanSetOut & { plan_run_id: number }>(`/api/v1/lists/${listId}/plan`, json({ members, fillers })),
+    call<PlanSetOut & { plan_run_id: number; no_prices: string[] }>(`/api/v1/lists/${listId}/plan`, json({ members, fillers })),
   accept: (runId: number, label: string) => call<Basket[]>(`/api/v1/plan-runs/${runId}/accept`, json({ label })),
 
   offers: (includeArchived = false) => call<SavedOffer[]>(`/api/v1/offers?include_archived=${includeArchived}`),

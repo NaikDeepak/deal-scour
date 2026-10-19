@@ -407,10 +407,10 @@ def test_case_7_patch_archive_and_unpriced_list_need(listings_client: TestClient
     deals = listings_client.get("/api/v1/deals").json()["deals"]
     assert not any(d["id"] == lid for d in deals)
 
-    # Planning the saved list now fails validation because product_key is archived
+    # Planning the saved list now fails because its only need has no listing left
     plan2_res = listings_client.post(f"/api/v1/lists/{list_id}/plan", json={})
     assert plan2_res.status_code == 422
-    assert f"Unknown product_key: {pk}" in plan2_res.text
+    assert f"No prices yet for: {pk.replace('_', ' ')}" in plan2_res.text
 
 
 def test_case_8_catalog_families(listings_client: TestClient) -> None:
