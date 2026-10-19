@@ -91,6 +91,84 @@ def create_price_observation(
     return obs
 
 
+class PriceCaptureCreate(BaseModel):
+    listing_id: str | None = None
+    url: str | None = None
+    listed_paise: Paise
+    mrp_paise: Paise | None = None
+    member_price_paise: Paise | None = None
+    in_stock: bool = True
+    eta_minutes: int | None = None
+    note: str | None = Field(default=None, max_length=120)
+
+    @model_validator(mode="after")
+    def validate_capture(self) -> "PriceCaptureCreate":
+        if not self.listing_id and not self.url:
+            raise ValueError("Either listing_id or url is required")
+        if self.listed_paise <= 0:
+            raise ValueError(f"listed_paise must be positive, got {self.listed_paise}")
+        if self.mrp_paise is not None and self.mrp_paise < self.listed_paise:
+            raise ValueError(
+                f"mrp_paise ({self.mrp_paise}) cannot be less than listed_paise ({self.listed_paise})"
+            )
+        if self.member_price_paise is not None:
+            if self.member_price_paise < 0:
+                raise ValueError("member_price_paise cannot be negative")
+            if self.member_price_paise > self.listed_paise:
+                raise ValueError(
+                    f"member_price_paise ({self.member_price_paise}) "
+                    f"cannot exceed listed_paise ({self.listed_paise})"
+                )
+        if self.eta_minutes is not None and self.eta_minutes < 0:
+            raise ValueError(f"eta_minutes cannot be negative, got {self.eta_minutes}")
+        return self
+
+
+@router.post("/prices/capture", response_model=PriceObservationOut, status_code=201)
+def capture_price_observation(
+    req: PriceCaptureCreate,
+    household_id: HouseholdIdDep,
+    session: SessionDep,
+    now_dt: ClockDep,
+) -> PriceObservation:
+    catalog_items = all_listings(session=session, household_id=household_id)
+    by_id = {item.id: item for item in catalog_items}
+
+    resolved_id: str | None = None
+    if req.listing_id is not None:
+        if req.listing_id not in by_id:
+            raise HTTPException(status_code=422, detail=f"Unknown listing_id: {req.listing_id}")
+        resolved_id = req.listing_id
+    elif req.url is not None:
+        norm_url = req.url.strip().rstrip("/")
+        for item in catalog_items:
+            if item.url.strip().rstrip("/") == norm_url:
+                resolved_id = item.id
+                break
+        if resolved_id is None:
+            raise HTTPException(status_code=422, detail=f"Unknown listing url: {req.url}")
+
+    assert resolved_id is not None
+    mrp_val = req.mrp_paise if req.mrp_paise is not None else req.listed_paise
+
+    obs = PriceObservation(
+        household_id=household_id,
+        listing_id=resolved_id,
+        listed_paise=req.listed_paise,
+        mrp_paise=mrp_val,
+        member_price_paise=req.member_price_paise,
+        in_stock=req.in_stock,
+        eta_minutes=req.eta_minutes,
+        source="extension",
+        note=req.note,
+        observed_at=now_dt,
+    )
+    session.add(obs)
+    session.commit()
+    session.refresh(obs)
+    return obs
+
+
 @router.get("/prices", response_model=list[PriceObservationOut])
 def get_price_observations(
     household_id: HouseholdIdDep,

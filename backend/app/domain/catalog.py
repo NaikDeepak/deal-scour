@@ -60,10 +60,20 @@ class SeedListing:
 class CurrentListing:  # a SeedListing with the household's latest observation applied
     # listed/mrp/member_discount/eta replaced by observation values when one exists
     listing: SeedListing
-    source: Literal["sample", "manual", "fetcher"]
+    source: Literal["sample", "manual", "fetcher", "extension"]
     observed_at: datetime | None  # None for sample
     freshness: Literal["sample", "fresh", "ok", "stale"]
     in_stock: bool
+
+
+def _map_observation_source(raw: str) -> Literal["sample", "manual", "fetcher", "extension"]:
+    if raw == "manual":
+        return "manual"
+    if raw == "fetcher":
+        return "fetcher"
+    if raw == "extension":
+        return "extension"
+    return "sample"
 
 
 def compute_freshness(
@@ -139,11 +149,7 @@ def current_listings(
                 eta_minutes=eta,
             )
             freshness = compute_freshness(item.platform, matched_obs.observed_at, now)
-            source_val: Literal["sample", "manual", "fetcher"] = (
-                "manual"
-                if matched_obs.source == "manual"
-                else ("fetcher" if matched_obs.source == "fetcher" else "sample")
-            )
+            source_val = _map_observation_source(matched_obs.source)
             result.append(
                 CurrentListing(
                     listing=updated_listing,
@@ -198,11 +204,7 @@ def current_listings(
             source="manual",
         )
         freshness = compute_freshness(custom.platform, matched_obs.observed_at, now)
-        custom_source_val: Literal["sample", "manual", "fetcher"] = (
-            "manual"
-            if matched_obs.source == "manual"
-            else ("fetcher" if matched_obs.source == "fetcher" else "sample")
-        )
+        custom_source_val = _map_observation_source(matched_obs.source)
         result.append(
             CurrentListing(
                 listing=custom_seed_listing,

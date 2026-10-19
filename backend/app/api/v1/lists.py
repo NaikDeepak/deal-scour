@@ -5,14 +5,18 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlmodel import Session, col, func, select
 
+from app.core import clock
 from app.core.db import current_household_id, get_session
+from app.domain.catalog import current_listings
 from app.domain.models import Need, ShoppingList
 from app.domain.need_rules import validate_need
+from app.pricing.units import parse_pack
 
 router = APIRouter()
 
 HouseholdIdDep = Annotated[int, Depends(current_household_id)]
 SessionDep = Annotated[Session, Depends(get_session)]
+ClockDep = Annotated[datetime, Depends(clock.now)]
 
 
 class ShoppingListCreate(BaseModel):
@@ -481,3 +485,86 @@ def delete_need(
         created_at=need.created_at,
         updated_at=need.updated_at,
     )
+
+
+class ScourTargetOut(BaseModel):
+    listing_id: str
+    platform: str
+    url: str
+    title: str
+    brand: str
+    pack_label: str
+    product_key: str
+    family_key: str
+    freshness: str
+    price_source: str
+
+
+class ScourTargetsResponse(BaseModel):
+    list_id: int
+    targets: list[ScourTargetOut]
+
+
+@router.get("/lists/{id}/scour-targets", response_model=ScourTargetsResponse)
+def get_list_scour_targets(
+    id: int,
+    household_id: HouseholdIdDep,
+    session: SessionDep,
+    now_dt: ClockDep,
+) -> ScourTargetsResponse:
+    s_list = session.exec(
+        select(ShoppingList).where(
+            ShoppingList.id == id,
+            ShoppingList.household_id == household_id,
+        )
+    ).first()
+    if s_list is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="List not found",
+        )
+
+    open_needs = session.exec(
+        select(Need)
+        .where(Need.list_id == id, Need.status == "open")
+        .order_by(col(Need.created_at).asc(), col(Need.id).asc())
+    ).all()
+
+    cur_items = current_listings(session=session, household_id=household_id, now=now_dt)
+    seen_ids: set[str] = set()
+    targets: list[ScourTargetOut] = []
+
+    for need in open_needs:
+        for cur in cur_items:
+            listing = cur.listing
+            if listing.id in seen_ids:
+                continue
+            matched = False
+            if need.product_key is not None and listing.product_key == need.product_key:
+                matched = True
+            elif need.family_key is not None and listing.family_key == need.family_key:
+                if need.quantity is not None:
+                    want_pack = parse_pack(need.quantity)
+                    if listing.pack.unit == want_pack.unit:
+                        matched = True
+                else:
+                    matched = True
+
+            if matched:
+                seen_ids.add(listing.id)
+                targets.append(
+                    ScourTargetOut(
+                        listing_id=listing.id,
+                        platform=listing.platform,
+                        url=listing.url,
+                        title=listing.title,
+                        brand=listing.brand,
+                        pack_label=listing.pack_label,
+                        product_key=listing.product_key,
+                        family_key=listing.family_key,
+                        freshness=cur.freshness,
+                        price_source=cur.source,
+                    )
+                )
+
+    return ScourTargetsResponse(list_id=id, targets=targets)

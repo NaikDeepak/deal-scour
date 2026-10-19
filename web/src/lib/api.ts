@@ -245,12 +245,37 @@ export interface Ledger {
   cashback_pending_paise: number
 }
 
+export interface ScourTarget {
+  listing_id: string
+  platform: Platform
+  url: string
+  title: string
+  brand: string
+  pack_label: string
+  product_key: string
+  family_key: string
+  freshness: Deal['freshness']
+  price_source: Deal['price_source']
+}
+
+export interface PriceCaptureIn {
+  listing_id?: string | null
+  url?: string | null
+  listed_paise: number
+  mrp_paise?: number | null
+  member_price_paise?: number | null
+  in_stock?: boolean
+  eta_minutes?: number | null
+  note?: string | null
+}
+
 const json = (body: unknown): RequestInit => ({ method: 'POST', body: JSON.stringify(body) })
 
 export const api = {
   lists: () => call<ListSummary[]>('/api/v1/lists'),
   createList: (name: string, kind: ListSummary['kind']) => call<ListSummary>('/api/v1/lists', json({ name, kind })),
   list: (id: number) => call<ListDetail>(`/api/v1/lists/${id}`),
+  scourTargets: (listId: number) => call<{ list_id: number; targets: ScourTarget[] }>(`/api/v1/lists/${listId}/scour-targets`),
   addNeed: (listId: number, need: Omit<NeedIn, 'line_id'> & { line_id: string }) =>
     call<SavedNeed>(`/api/v1/lists/${listId}/needs`, json(need)),
   updateNeed: (id: number, patch: Partial<SavedNeed>) =>
@@ -275,6 +300,7 @@ export const api = {
   ledger: () => call<Ledger>('/api/v1/ledger/summary'),
 
   observePrice: (p: PriceIn) => call<unknown>('/api/v1/prices', json(p)),
+  capturePrice: (p: PriceCaptureIn) => call<unknown>('/api/v1/prices/capture', json(p)),
 }
 
 // ---- Auth and household (backend/app/api/v1/{auth,households}.py) ----
