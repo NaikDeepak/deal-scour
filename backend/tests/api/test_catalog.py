@@ -4,6 +4,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import pytest
+import sqlalchemy as sa
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.engine import Engine
@@ -226,3 +227,159 @@ def test_case_6_score_candidates_drops_non_product_and_ranks_and_writes_nothing(
     with Session(engine) as s:
         listings = s.exec(select(CustomListing)).all()
         assert listings == []
+
+
+def test_case_2_pack_parsing_rules() -> None:
+    from app.sources.autofill import _extract_pack_label
+
+    assert _extract_pack_label("200 Gram (Pack Of 2)") == "400g"
+    assert _extract_pack_label("Pack of 3 x 200g") == "600g"
+    assert _extract_pack_label("1 Kg") == "1kg"
+    assert _extract_pack_label("Premium Walnuts") is None
+    assert _extract_pack_label("500gm") == "500g"
+
+
+def test_case_3_candidate_null_pack_when_unknown(catalog_client: TestClient) -> None:
+    items = catalog_client.get("/api/v1/catalog", params={"q": "tata toor"}).json()
+    cat_id = items[0]["id"]
+
+    payload = {
+        "results": [
+            {
+                "platform": "flipkart",
+                "url": "https://www.flipkart.com/toor-dal/p/itm123456?pid=DAL12345678",
+                "title": "Fresh Premium Toor Dal",
+                "price_paise": 11000,
+                "pack_label": None,
+            }
+        ]
+    }
+    res = catalog_client.post(f"/api/v1/catalog/{cat_id}/candidates", json=payload)
+    assert res.status_code == 200, res.text
+    scored = res.json()
+    assert len(scored) == 1
+    assert scored[0]["pack_label"] is None
+    assert scored[0]["pack_matches"] is False
+
+
+def test_case_4_candidate_brand_resolution(catalog_client: TestClient, engine: Engine) -> None:
+    with Session(engine) as s:
+        cat = CatalogProduct(
+            household_id=1,
+            seed_product_id="WALNUT-1",
+            name="California Walnuts",
+            brand="Happilo",
+            category="dryfruits",
+            family_key="walnuts",
+            pack_label="500g",
+            target_pack_weight_g=500,
+        )
+        s.add(cat)
+        s.commit()
+        s.refresh(cat)
+        cat_id = cat.id
+
+    payload = {
+        "results": [
+            {
+                "platform": "amazon",
+                "url": "https://www.amazon.in/dp/B000000001",
+                "title": "Deluxe Walnut Kernels 200g",
+                "price_paise": 25000,
+            },
+            {
+                "platform": "amazon",
+                "url": "https://www.amazon.in/dp/B000000002",
+                "title": "Happilo Premium Walnuts 500g",
+                "price_paise": 45000,
+            },
+        ]
+    }
+    res = catalog_client.post(f"/api/v1/catalog/{cat_id}/candidates", json=payload)
+    assert res.status_code == 200, res.text
+    scored = {c["url"]: c for c in res.json()}
+    assert scored["https://www.amazon.in/dp/B000000001"]["brand"] == "Deluxe"
+    assert scored["https://www.amazon.in/dp/B000000002"]["brand"] == "Happilo"
+
+
+def test_case_6_free_text_search_urls_and_candidates(catalog_client: TestClient) -> None:
+    res = catalog_client.get("/api/v1/catalog/search-urls", params={"q": "Sunflower Seeds 500g"})
+    assert res.status_code == 200, res.text
+    urls = res.json()
+    assert len(urls) == 5
+    by_plat = {u["platform"]: u["url"] for u in urls}
+    assert "amazon" in by_plat
+    assert "Sunflower" in by_plat["amazon"] or "sunflower" in by_plat["amazon"].lower()
+
+    cand_payload = {
+        "results": [
+            {
+                "platform": "amazon",
+                "url": "https://www.amazon.in/dp/B09XYZ0001",
+                "title": "True Elements Raw Sunflower Seeds 500g",
+                "price_paise": 22000,
+                "pack_label": "500g",
+            }
+        ]
+    }
+    score_res = catalog_client.post(
+        "/api/v1/catalog/candidates",
+        params={"q": "Sunflower Seeds", "pack": "500g"},
+        json=cand_payload,
+    )
+    assert score_res.status_code == 200, score_res.text
+    scored = score_res.json()
+    assert len(scored) == 1
+    assert scored[0]["title"] == "True Elements Raw Sunflower Seeds 500g"
+    assert scored[0]["pack_matches"] is True
+    assert scored[0]["pack_label"] == "500g"
+
+
+def test_case_5_migration_0010_catalog_categories(engine: Engine) -> None:
+    import importlib
+    mig_mod = importlib.import_module("migrations.versions.0010_catalog_categories")
+    mig_0010_upgrade = mig_mod.upgrade
+
+    with Session(engine) as s:
+        s.execute(
+            sa.text(
+                "INSERT INTO catalog_product "
+                "(household_id, seed_product_id, name, brand, category, "
+                "family_key, pack_label, target_pack_weight_g, suggestions_json, "
+                "created_at, updated_at) "
+                "VALUES (1, 'OLD-001', 'Kaju', 'Happilo', 'cashews', 'cashews', "
+                "'500g', 500, '[]', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+            )
+        )
+        s.execute(
+            sa.text(
+                "INSERT INTO custom_listing "
+                "(household_id, listing_id, platform, sku, url, title, brand, "
+                "pack_label, category, product_key, family_key, created_at) "
+                "VALUES (1, 'cus-old-1', 'amazon', 'B001', "
+                "'https://www.amazon.in/dp/B001', 'Old Cashews', 'Happilo', "
+                "'500g', 'dry_fruits_nuts', 'old_cashews', 'cashews', "
+                "CURRENT_TIMESTAMP)"
+            )
+        )
+        s.commit()
+
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    with engine.connect() as conn:
+        ctx = MigrationContext.configure(conn)
+        with Operations.context(ctx):
+            mig_0010_upgrade()
+        conn.commit()
+
+    with Session(engine) as s:
+        cat = s.exec(select(CatalogProduct).where(CatalogProduct.seed_product_id == "OLD-001")).first()
+        assert cat is not None
+        assert cat.category == "dryfruits"
+        assert cat.name == "Kaju"
+
+        listing = s.exec(select(CustomListing).where(CustomListing.listing_id == "cus-old-1")).first()
+        assert listing is not None
+        assert listing.category == "dryfruits"
+        assert listing.title == "Old Cashews"

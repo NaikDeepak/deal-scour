@@ -43,7 +43,7 @@ def test_case_1_and_3_import_catalog_sample_csv(mem_session: Session) -> None:
     assert dal.name == "Tata Sampann Toor/Arhar Dal"
     assert "(target" not in dal.name
     assert dal.brand == "Tata Sampann"
-    assert dal.category == "Dal & Pulses"
+    assert dal.category == "staples"
     assert dal.pack_label == "600g"
     assert dal.target_pack_weight_g == 600
     assert dal.family_key == "toor_dal"
@@ -59,7 +59,7 @@ def test_case_1_and_3_import_catalog_sample_csv(mem_session: Session) -> None:
     assert almonds.name == "Happilo California Almonds"
     assert "(target" not in almonds.name
     assert almonds.brand == "Happilo"
-    assert almonds.category == "Almonds"
+    assert almonds.category == "dryfruits"
     assert almonds.pack_label == "1kg"
     assert almonds.target_pack_weight_g == 1000
     assert almonds.family_key == "almonds"
@@ -128,3 +128,30 @@ def test_import_csv_with_byte_order_mark(mem_session: Session, tmp_path: Path) -
     report = import_catalog_csv(mem_session, household_id=1, csv_path=bom_csv)
     assert report.created == 3
     assert report.skipped == []
+
+
+def test_case_5_import_category_mapping_to_app_vocabulary(mem_session: Session, tmp_path: Path) -> None:
+    csv_file = tmp_path / "categories.csv"
+    header = (
+        "seed_product_id,product_name,brand,category,target_pack_weight_g,"
+        "platform,url,url_type,price_paise,pincode,notes\n"
+    )
+    rows = (
+        "C-1,Tata Cashews,Tata,Cashews,500,Blinkit,https://blinkit.com/s/?q=x,"
+        "Search URL (discovery),500,411018,note\n"
+        "C-2,Tata Toor Dal,Tata,Dal & Pulses,1000,Blinkit,https://blinkit.com/s/?q=x,"
+        "Search URL (discovery),500,411018,note\n"
+        "C-3,Kelloggs Cornflakes,Kelloggs,Breakfast & Cereals,500,Blinkit,"
+        "https://blinkit.com/s/?q=x,Search URL (discovery),500,411018,note\n"
+        "C-4,Haldirams Bhujia,Haldirams,Snacks & Savoury,200,Blinkit,"
+        "https://blinkit.com/s/?q=x,Search URL (discovery),500,411018,note\n"
+    )
+    csv_file.write_text(header + rows, encoding="utf-8")
+    report = import_catalog_csv(mem_session, household_id=1, csv_path=csv_file)
+    assert report.created == 4
+
+    rows = {r.seed_product_id: r for r in mem_session.exec(select(CatalogProduct)).all()}
+    assert rows["C-1"].category == "dryfruits"
+    assert rows["C-2"].category == "staples"
+    assert rows["C-3"].category == "breakfast"
+    assert rows["C-4"].category == "snacks"

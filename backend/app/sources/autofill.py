@@ -160,33 +160,82 @@ def _extract_brand(title: str) -> str:
 
 
 def _extract_pack_label(title: str) -> str | None:
+    if not title or not title.strip():
+        return None
+    s = title.strip()
+
     # Check pounds (lb / lbs) conversion first: 2 lb -> 907g
-    lb_m = re.search(r"\b(\d+(?:\.\d+)?)\s*(?:lb|lbs)\b", title, re.IGNORECASE)
+    lb_m = re.search(r"\b(\d+(?:\.\d+)?)\s*(?:lb|lbs)\b", s, re.IGNORECASE)
     if lb_m:
         val = float(lb_m.group(1))
         grams = round(val * 453.59237)
         return f"{grams}g"
 
-    # Match metric and count units
-    m = re.search(
-        r"\b(\d+(?:\.\d+)?)\s*(kg|kgs|g|gm|gms|ml|mls|l|ltr|ltrs|pcs|pieces|pc)\b",
-        title,
+    unit_pattern = r"(?:g|gm|gms|gram|grams|kg|kgs|ml|mls|l|ltr|ltrs|litre|litres|pcs|pieces|pc)"
+
+    def format_qty(val: float, raw_unit: str, mult: int = 1) -> str | None:
+        total = val * mult
+        if total <= 0:
+            return None
+        total_str = str(int(total)) if total == int(total) else f"{total:g}"
+        u = raw_unit.lower()
+        if u in ("kg", "kgs"):
+            return f"{total_str}kg"
+        if u in ("l", "ltr", "ltrs", "litre", "litres"):
+            return f"{total_str}l"
+        if u in ("ml", "mls"):
+            return f"{total_str}ml"
+        if u in ("pcs", "pieces", "pc"):
+            return f"{total_str}pcs"
+        return f"{total_str}g"
+
+    # 1. Prefix multiplier: "Pack of 3 x 200g", "3 x 200g"
+    prefix_m = re.search(
+        rf"(?:pack\s+of\s+)?(\d+)\s*[xX*]\s*(\d+(?:\.\d+)?)\s*({unit_pattern})\b",
+        s,
         re.IGNORECASE,
     )
-    if m:
-        val_str = m.group(1)
-        raw_unit = m.group(2).lower()
-        if raw_unit in ("kg", "kgs"):
-            unit = "kg"
-        elif raw_unit in ("g", "gm", "gms"):
-            unit = "g"
-        elif raw_unit in ("ml", "mls"):
-            unit = "ml"
-        elif raw_unit in ("l", "ltr", "ltrs"):
-            unit = "L"
-        else:
-            unit = "pcs"
-        return f"{val_str}{unit}"
+    if prefix_m:
+        mult = int(prefix_m.group(1))
+        val = float(prefix_m.group(2))
+        unit = prefix_m.group(3)
+        return format_qty(val, unit, mult)
+
+    # 2. Suffix multiplier with "(Pack of N)" or "Pack of N" or "[Pack of N]": e.g. "200 Gram (Pack Of 2)"
+    suffix_pack_of = re.search(
+        rf"(\d+(?:\.\d+)?)\s*({unit_pattern})\b[^(]*[\[(]?\s*pack\s+of\s+(\d+)\s*[\])]?",
+        s,
+        re.IGNORECASE,
+    )
+    if suffix_pack_of:
+        val = float(suffix_pack_of.group(1))
+        unit = suffix_pack_of.group(2)
+        mult = int(suffix_pack_of.group(3))
+        return format_qty(val, unit, mult)
+
+    # 3. Suffix multiplier "Q x N": e.g. "200g x 3"
+    suffix_mult = re.search(
+        rf"(\d+(?:\.\d+)?)\s*({unit_pattern})\b\s*[xX*]\s*(\d+)\b",
+        s,
+        re.IGNORECASE,
+    )
+    if suffix_mult:
+        val = float(suffix_mult.group(1))
+        unit = suffix_mult.group(2)
+        mult = int(suffix_mult.group(3))
+        return format_qty(val, unit, mult)
+
+    # 4. "Pack of N" with no quantity -> ambiguous / None
+    if re.fullmatch(r"\(?\s*pack\s+of\s+\d+\s*\)?", s, re.IGNORECASE):
+        return None
+
+    # 5. Standard single quantity match: e.g. "1 Kg", "500gm"
+    matches = list(re.finditer(rf"\b(\d+(?:\.\d+)?)\s*({unit_pattern})\b", s, re.IGNORECASE))
+    if len(matches) == 1:
+        val = float(matches[0].group(1))
+        unit = matches[0].group(2)
+        return format_qty(val, unit, 1)
+
     return None
 
 

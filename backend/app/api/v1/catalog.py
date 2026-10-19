@@ -13,7 +13,7 @@ from app.domain.catalog_import import CatalogSuggestion
 from app.domain.models import CatalogProduct, CustomListing
 from app.pricing.fee_schedules import Platform
 from app.pricing.units import parse_pack
-from app.sources.autofill import _extract_pack_label
+from app.sources.autofill import _extract_brand, _extract_pack_label
 from app.sources.urls import parse_product_url
 
 router = APIRouter()
@@ -56,6 +56,7 @@ class ScoredCandidateOut(BaseModel):
     sku: str
     url: str
     title: str
+    brand: str
     price_paise: Paise | None = None
     pack_label: str | None = None
     pack_matches: bool
@@ -133,6 +134,49 @@ def search_catalog(
     return matched
 
 
+def _build_search_urls(query_str: str) -> list[SearchUrlOut]:
+    encoded = quote_plus(query_str.strip())
+    return [
+        SearchUrlOut(platform="amazon", url=f"https://www.amazon.in/s?k={encoded}"),
+        SearchUrlOut(platform="flipkart", url=f"https://www.flipkart.com/search?q={encoded}"),
+        SearchUrlOut(platform="blinkit", url=f"https://blinkit.com/s/?q={encoded}"),
+        SearchUrlOut(platform="zepto", url=f"https://www.zepto.com/search?query={encoded}"),
+        SearchUrlOut(
+            platform="instamart",
+            url=f"https://www.swiggy.com/instamart/search?query={encoded}",
+        ),
+    ]
+
+
+def _resolve_candidate_brand(candidate_title: str, catalog_brand: str | None) -> str:
+    if catalog_brand and catalog_brand.strip():
+        b = catalog_brand.strip()
+        pattern = rf"\b{re.escape(b)}\b"
+        if re.search(pattern, candidate_title, re.IGNORECASE):
+            return b
+    return _extract_brand(candidate_title)
+
+
+def _check_pack_matches(pack_label: str | None, target_weight_g: int) -> bool:
+    if not pack_label or target_weight_g <= 0:
+        return False
+    try:
+        parsed = parse_pack(pack_label)
+    except ValueError:
+        return False
+    if parsed.unit not in ("g", "ml"):
+        return False
+    return abs(parsed.qty - target_weight_g) * 10 <= target_weight_g
+
+
+@router.get("/catalog/search-urls", response_model=list[SearchUrlOut])
+def get_free_text_search_urls(
+    household_id: HouseholdIdDep,
+    q: str = Query(..., min_length=1, max_length=80),
+) -> list[SearchUrlOut]:
+    return _build_search_urls(q)
+
+
 @router.get("/catalog/{id}/search-urls", response_model=list[SearchUrlOut])
 def get_catalog_search_urls(
     id: int,
@@ -148,29 +192,84 @@ def get_catalog_search_urls(
     else:
         query_str = f"{brand_clean} {name_clean} {row.pack_label}".strip()
 
-    encoded = quote_plus(query_str)
-    return [
-        SearchUrlOut(platform="amazon", url=f"https://www.amazon.in/s?k={encoded}"),
-        SearchUrlOut(platform="flipkart", url=f"https://www.flipkart.com/search?q={encoded}"),
-        SearchUrlOut(platform="blinkit", url=f"https://blinkit.com/s/?q={encoded}"),
-        SearchUrlOut(platform="zepto", url=f"https://www.zepto.com/search?query={encoded}"),
-        SearchUrlOut(
-            platform="instamart",
-            url=f"https://www.swiggy.com/instamart/search?query={encoded}",
-        ),
-    ]
+    return _build_search_urls(query_str)
 
 
-def _check_pack_matches(pack_label: str | None, target_weight_g: int) -> bool:
-    if not pack_label or target_weight_g <= 0:
-        return False
-    try:
-        parsed = parse_pack(pack_label)
-    except ValueError:
-        return False
-    if parsed.unit not in ("g", "ml"):
-        return False
-    return abs(parsed.qty - target_weight_g) * 10 <= target_weight_g
+@router.post("/catalog/candidates", response_model=list[ScoredCandidateOut])
+def score_free_text_candidates(
+    req: CandidatesRequest,
+    household_id: HouseholdIdDep,
+    session: SessionDep,
+    q: str = Query(..., min_length=1, max_length=80),
+    pack: str | None = Query(default=None, max_length=20),
+) -> list[ScoredCandidateOut]:
+    target_weight_g = 0
+    if pack:
+        try:
+            parsed = parse_pack(pack)
+            if parsed.unit in ("g", "ml"):
+                target_weight_g = parsed.qty
+        except ValueError:
+            target_weight_g = 0
+
+    q_words = list(dict.fromkeys(_words(q)))
+    query_brand = _extract_brand(q)
+    brand_words = list(dict.fromkeys(_words(query_brand))) if query_brand != "Generic" else []
+
+    existing_listings = session.exec(
+        select(CustomListing).where(
+            CustomListing.household_id == household_id,
+            col(CustomListing.archived).is_(False),
+        )
+    ).all()
+    existing_by_key = {(c.platform, c.sku): c.listing_id for c in existing_listings}
+    existing_by_url = {c.url: c.listing_id for c in existing_listings}
+
+    scored: list[ScoredCandidateOut] = []
+    for item in req.results:
+        try:
+            ref = parse_product_url(item.url)
+        except ValueError:
+            continue
+
+        title_clean = item.title.strip()
+        title_words = set(_words(title_clean))
+
+        raw_pack = item.pack_label
+        pack_label = (raw_pack and _extract_pack_label(raw_pack)) or _extract_pack_label(title_clean)
+        pack_matches = _check_pack_matches(pack_label, target_weight_g) if target_weight_g > 0 else False
+
+        catalog_brand_hint = query_brand if query_brand != "Generic" else None
+        candidate_brand = _resolve_candidate_brand(title_clean, catalog_brand_hint)
+
+        score = 0
+        if brand_words and any(bw in title_words for bw in brand_words):
+            score += 2
+        if pack_matches:
+            score += 2
+        for nw in q_words:
+            if nw in title_words:
+                score += 1
+
+        existing_id = existing_by_url.get(ref.url) or existing_by_key.get((ref.platform, ref.sku))
+
+        scored.append(
+            ScoredCandidateOut(
+                platform=ref.platform,
+                sku=ref.sku,
+                url=ref.url,
+                title=title_clean,
+                brand=candidate_brand,
+                price_paise=item.price_paise,
+                pack_label=pack_label,
+                pack_matches=pack_matches,
+                score=score,
+                existing_listing_id=existing_id,
+            )
+        )
+
+    scored.sort(key=lambda c: c.score, reverse=True)
+    return scored
 
 
 @router.post("/catalog/{id}/candidates", response_model=list[ScoredCandidateOut])
@@ -204,8 +303,11 @@ def score_catalog_candidates(
         title_clean = item.title.strip()
         title_words = set(_words(title_clean))
 
-        pack_label = item.pack_label or _extract_pack_label(title_clean)
+        raw_pack = item.pack_label
+        pack_label = (raw_pack and _extract_pack_label(raw_pack)) or _extract_pack_label(title_clean)
         pack_matches = _check_pack_matches(pack_label, row.target_pack_weight_g)
+
+        candidate_brand = _resolve_candidate_brand(title_clean, row.brand)
 
         score = 0
         if brand_words and any(bw in title_words for bw in brand_words):
@@ -224,6 +326,7 @@ def score_catalog_candidates(
                 sku=ref.sku,
                 url=ref.url,
                 title=title_clean,
+                brand=candidate_brand,
                 price_paise=item.price_paise,
                 pack_label=pack_label,
                 pack_matches=pack_matches,

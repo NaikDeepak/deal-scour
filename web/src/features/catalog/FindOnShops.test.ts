@@ -128,12 +128,82 @@ describe('FindOnShops', () => {
       title: 'Tata Sampann Toor Dal',
       brand: 'Tata Sampann',
       pack_label: '600g',
-      category: 'dal_pulses',
+      category: 'staples',
       family_key: 'toor_dal',
       listed_paise: 14000,
       mrp_paise: 14000,
       member_price_paise: null,
       in_stock: true,
     })
+  })
+
+  it('renders "Open search on Blinkit ↗" for a no_links shop', () => {
+    const html = renderToStaticMarkup(
+      createElement(FindOnShops, {
+        product: PRODUCT,
+        extReady: true,
+        initialSearchUrls: SEARCH_URLS,
+        initialNoLinkShops: [
+          {
+            platform: 'blinkit',
+            status: 'no_links',
+            search_url: 'https://blinkit.com/s/?q=Tata+Sampann+Toor+Dal+600g',
+          },
+        ],
+        onClose: () => {},
+      }),
+    )
+    expect(html).toContain('Open search on Blinkit ↗')
+    expect(html).toContain('no product links on its search page')
+  })
+
+  it('candidate with null pack_label renders pack input and disables checkbox until typed', () => {
+    const candidateNoPack: CatalogCandidate = {
+      platform: 'flipkart',
+      sku: 'WAL12345678',
+      url: 'https://www.flipkart.com/walnuts/p/itm123456?pid=WAL12345678',
+      title: 'Flipkart Walnuts',
+      price_paise: 25000,
+      pack_label: null,
+      pack_matches: false,
+      score: 1,
+    }
+    const html = renderToStaticMarkup(
+      createElement(FindOnShops, {
+        product: { ...PRODUCT, pack_label: '500g' },
+        extReady: true,
+        initialSearchUrls: SEARCH_URLS,
+        initialCandidates: [candidateNoPack],
+        onClose: () => {},
+      }),
+    )
+    expect(html).toContain('placeholder="e.g. 200g"')
+    expect(html).toContain('disabled=""')
+  })
+
+  it('uses candidate brand instead of catalog brand when candidate has its own brand', async () => {
+    const addListing = vi.fn().mockResolvedValue({ listing_id: 'cus-1', product_key: 'deluxe_walnuts' })
+    const candidate: CatalogCandidate = {
+      platform: 'amazon',
+      sku: 'B000000001',
+      url: 'https://www.amazon.in/dp/B000000001',
+      title: 'Deluxe Walnut Kernels 200g',
+      brand: 'Deluxe',
+      price_paise: 25000,
+      pack_label: '200g',
+      pack_matches: false,
+      score: 2,
+    }
+    await trackSelectedCandidates(
+      { ...PRODUCT, brand: 'Happilo' },
+      [candidate],
+      { addListing, existingByUrl: new Map() },
+    )
+    expect(addListing).toHaveBeenCalledWith(
+      expect.objectContaining({
+        brand: 'Deluxe',
+        pack_label: '200g',
+      }),
+    )
   })
 })

@@ -42,6 +42,61 @@ def weight_g_to_pack_label(weight_g: int) -> str:
     return f"{weight_g}g"
 
 
+CATEGORY_VOCABULARY_MAP: dict[str, str] = {
+    # dryfruits
+    "dry fruits & nuts": "dryfruits",
+    "dry fruits and nuts": "dryfruits",
+    "dry_fruits_nuts": "dryfruits",
+    "dry_fruits": "dryfruits",
+    "almonds": "dryfruits",
+    "cashews": "dryfruits",
+    "raisins": "dryfruits",
+    "walnuts": "dryfruits",
+    "pistachios": "dryfruits",
+    "dates": "dryfruits",
+    "dryfruits": "dryfruits",
+    # staples
+    "dal & pulses": "staples",
+    "dal and pulses": "staples",
+    "dal_pulses": "staples",
+    "rice, grains & flours": "staples",
+    "rice, grains and flours": "staples",
+    "rice_grains_flours": "staples",
+    "spices & masalas": "staples",
+    "spices and masalas": "staples",
+    "spices_masalas": "staples",
+    "cooking essentials": "staples",
+    "cooking_essentials": "staples",
+    "packaged ready mixes": "staples",
+    "packaged_ready_mixes": "staples",
+    "staples": "staples",
+    # breakfast
+    "breakfast & cereals": "breakfast",
+    "breakfast and cereals": "breakfast",
+    "breakfast_cereals": "breakfast",
+    "breakfast": "breakfast",
+    # snacks
+    "snacks & savoury": "snacks",
+    "snacks and savoury": "snacks",
+    "snacks & savory": "snacks",
+    "snacks and savory": "snacks",
+    "snacks_savoury": "snacks",
+    "snacks_savory": "snacks",
+    "snacks": "snacks",
+    # preserved app categories
+    "dairy": "dairy",
+    "fitness": "fitness",
+    "bakery": "bakery",
+    "poultry": "poultry",
+    "spices": "spices",
+}
+
+
+def normalize_catalog_category(category: str) -> str:
+    cleaned = category.strip().lower()
+    return CATEGORY_VOCABULARY_MAP.get(cleaned, "staples")
+
+
 def category_to_slug(category: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "_", category.strip().lower()).strip("_")
     return slug[:40] or "staples"
@@ -122,8 +177,8 @@ def import_catalog_csv(
             )
             continue
 
-        category = (first.get("category") or "").strip()
-        if not category or len(category) > 80:
+        raw_category = (first.get("category") or "").strip()
+        if not raw_category or len(raw_category) > 80:
             skipped.append(
                 ImportSkippedItem(
                     seed_product_id=seed_id,
@@ -131,6 +186,7 @@ def import_catalog_csv(
                 )
             )
             continue
+        category = normalize_catalog_category(raw_category)
 
         raw_weight = (first.get("target_pack_weight_g") or "").strip()
         try:
@@ -153,7 +209,7 @@ def import_catalog_csv(
             continue
 
         pack_label = weight_g_to_pack_label(weight_g)
-        family_key = infer_catalog_family_key(name, category)
+        family_key = infer_catalog_family_key(name, raw_category)
 
         suggestions: list[dict[str, str]] = []
         seen_suggestions: set[tuple[str, str]] = set()

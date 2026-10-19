@@ -85,8 +85,6 @@ export function CatalogNeedFindButton({
   catalogItem?: CatalogProductItem | null
   onFindOnShops: (item: CatalogProductItem) => void
 }) {
-  if (!catalogItem && !need.family_key) return null
-
   async function handleClick() {
     if (catalogItem) {
       onFindOnShops(catalogItem)
@@ -96,10 +94,29 @@ export function CatalogNeedFindButton({
       need.quantity && need.line_id.endsWith(` ${need.quantity}`)
         ? need.line_id.slice(0, -(need.quantity.length + 1)).trim()
         : need.line_id
-    const results = await catalog.search(queryText, 5)
-    // Only an exact name + pack match; never guess another product.
-    const exact = results.find((r) => `${r.name} ${r.pack_label}` === need.line_id)
-    if (exact) onFindOnShops(exact)
+    let exact: CatalogProductItem | undefined
+    try {
+      const results = await catalog.search(queryText, 5)
+      // Only an exact name + pack match; never guess another product.
+      exact = results.find((r) => `${r.name} ${r.pack_label}` === need.line_id)
+    } catch {
+      // Ignore network errors
+    }
+    if (exact) {
+      onFindOnShops(exact)
+    } else {
+      onFindOnShops({
+        id: 0,
+        seed_product_id: '',
+        name: queryText || need.line_id,
+        brand: '',
+        category: 'staples',
+        family_key: need.family_key || '',
+        pack_label: need.quantity || '',
+        target_pack_weight_g: 0,
+        suggestions: [],
+      })
+    }
   }
 
   return (
