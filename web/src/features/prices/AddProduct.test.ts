@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { paiseToRupeesInput } from '../../lib/money'
 import { parseBulkUrls, sourceLabel } from './AddProduct'
 
 describe('AddProduct helpers and autofill mapping', () => {
@@ -64,7 +65,7 @@ describe('AddProduct helpers and autofill mapping', () => {
     }
 
     expect(mockAutofill.title).toBe('Amul Butter 500 g')
-    expect(mockAutofill.listed_paise / 100).toBe(275)
+    expect(paiseToRupeesInput(mockAutofill.listed_paise)).toBe('275')
     expect(sourceLabel(mockAutofill.sources.title)?.label).toBe('from page')
     expect(sourceLabel(mockAutofill.sources.brand)?.label).toBe('guessed')
     expect(sourceLabel(mockAutofill.sources.family_key)?.label).toBe('AI')

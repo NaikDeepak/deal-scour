@@ -29,6 +29,12 @@ def mem_session() -> Session:
         yield s
 
 
+@pytest.fixture(autouse=True)
+def _fast_autofill_sleep(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> None:
+    if request.node.name != "test_autofill_polite_sleep_and_busy_lock":
+        monkeypatch.setattr("app.sources.autofill._sleep", lambda s: None)
+
+
 # 1. Autofill an Amazon fixture page → title, price, MRP from page;
 # brand "Amul", pack "500g", family "butter" from rules.
 def test_autofill_amazon_page_with_rules(mem_session: Session) -> None:
@@ -217,3 +223,119 @@ def test_gemini_key_never_leaks(mem_session: Session) -> None:
     # Ensure representations or error logs mask the key
     assert secret_key not in repr(client)
     assert secret_key not in str(client)
+
+
+# 20. Two autofills in a row: the second sleeps the remaining gap (fake clock).
+# Lock held by a run → 422 with that message, returns within the timeout.
+def test_autofill_polite_sleep_and_busy_lock(mem_session: Session) -> None:
+    amazon_html = (
+        '<span id="productTitle"> Product 1 </span>'
+        '<div id="corePriceDisplay_desktop_feature_div"><span class="a-price-whole">100</span></div>'
+    )
+    url = "https://www.amazon.in/dp/B072HG4WNC"
+
+    import app.sources.autofill as af
+    af._LAST_FETCH_TIME[0] = 0.0
+
+    curr_time = [100.0]
+    sleep_calls: list[float] = []
+
+    def fake_monotonic() -> float:
+        return curr_time[0]
+
+    def fake_sleep(sec: float) -> None:
+        sleep_calls.append(sec)
+        curr_time[0] += sec
+
+    with patch("app.sources.autofill.fetch_url", return_value=(200, amazon_html)), \
+         patch("app.sources.autofill._clock_monotonic", fake_monotonic), \
+         patch("app.sources.autofill._sleep", fake_sleep):
+        # 1st fetch at t=100.0
+        af.autofill_product_url(url, household_id=1, session=mem_session)
+        assert len(sleep_calls) == 0
+
+        # Advance clock by 3s (t=103.0). Elapsed is 3s (< 10s), so sleep 7s.
+        curr_time[0] = 103.0
+        af.autofill_product_url(url, household_id=1, session=mem_session)
+        assert len(sleep_calls) == 1
+        assert abs(sleep_calls[0] - 7.0) < 0.01
+
+    # Lock held by a run -> raises BusyRefreshingError
+    from app.sources.autofill import _RUN_LOCK, BusyRefreshingError
+    with patch("app.sources.autofill._LOCK_TIMEOUT", 0.05):
+        _RUN_LOCK.acquire()
+        try:
+            with pytest.raises(BusyRefreshingError, match="Prices are refreshing"):
+                af.autofill_product_url(url, household_id=1, session=mem_session)
+        finally:
+            _RUN_LOCK.release()
+
+
+# 24. Spend 9,995 with cap 10,000 → Gemini not called. Spend from household 2 counts for household 1.
+def test_gemini_cap_is_global_and_reserved(mem_session: Session) -> None:
+    amazon_html = (
+        '<span id="productTitle"> Obscure Unknown Item 250g </span>'
+        '<div id="corePriceDisplay_desktop_feature_div"><span class="a-price-whole">450</span></div>'
+    )
+    url = "https://www.amazon.in/dp/B072HG4WNC"
+
+    cap_settings = Settings(
+        db_path=Path(":memory:"),
+        secret_key="x" * 32,
+        gemini_api_key="valid-key",
+        gemini_model="gemini-3.8-flash",
+        llm_monthly_cap_paise=10000,
+    )
+    mem_session.add(
+        LlmUsage(
+            household_id=2,  # Spend from household 2 counts globally
+            provider="gemini",
+            model="gemini-3.8-flash",
+            prompt_tokens=1000,
+            response_tokens=1000,
+            total_tokens=2000,
+            cost_paise=9995,
+            created_at=datetime.now(UTC),
+        )
+    )
+    mem_session.commit()
+
+    mock_gemini = MagicMock()
+    with patch("app.sources.autofill.get_settings", return_value=cap_settings), \
+         patch("app.sources.autofill.fetch_url", return_value=(200, amazon_html)), \
+         patch("app.sources.gemini.call_gemini_extract", mock_gemini):
+        autofill_product_url(url, household_id=1, session=mem_session)
+
+    mock_gemini.assert_not_called()
+
+
+# 25. Fake Gemini returns {"brand": <the key>, "pack_label": 5} (invalid) → caplog never contains the key.
+def test_gemini_no_response_contents_in_logs_on_invalid_json(caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+    logging.getLogger("app.sources.gemini").disabled = False
+    caplog.set_level(logging.WARNING, logger="app.sources.gemini")
+    secret_key = "AIzaSy_SECRET_KEY_NEVER_LEAK"
+    client = GeminiClient(api_key=secret_key, model="gemini-3.8-flash")
+
+    bad_payload = {
+        "candidates": [
+            {
+                "content": {
+                    "parts": [{"text": f'{{"brand": "{secret_key}", "pack_label": 5}}'}]
+                }
+            }
+        ],
+        "usageMetadata": {"promptTokenCount": 5, "candidatesTokenCount": 5, "totalTokenCount": 10},
+    }
+
+    fake_resp = MagicMock()
+    fake_resp.status_code = 200
+    fake_resp.json.return_value = bad_payload
+
+    with patch("httpx.Client.post", return_value=fake_resp):
+        res, _, _, _ = client.extract_fields("Test Product")
+
+    assert res is None
+    assert secret_key not in caplog.text
+    assert "Gemini output was not valid JSON" in caplog.text
+

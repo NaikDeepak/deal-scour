@@ -1,5 +1,6 @@
 import logging
 import re
+import time
 from datetime import datetime
 
 from pydantic import BaseModel, Field
@@ -16,6 +17,15 @@ from app.sources.pages import parse_amazon_product, parse_flipkart_product
 from app.sources.urls import parse_product_url
 
 logger = logging.getLogger(__name__)
+
+_LAST_FETCH_TIME = [0.0]
+_clock_monotonic = time.monotonic
+_sleep = time.sleep
+_LOCK_TIMEOUT = 5.0
+
+
+class BusyRefreshingError(Exception):
+    pass
 
 KNOWN_BRANDS = [
     "Optimum Nutrition",
@@ -149,8 +159,17 @@ def autofill_product_url(
     in_stock: bool | None = None
 
     if ref.platform in ("amazon", "flipkart"):
-        with _RUN_LOCK:
+        if not _RUN_LOCK.acquire(timeout=_LOCK_TIMEOUT):
+            raise BusyRefreshingError("Prices are refreshing. Try again in a few minutes.")
+        try:
+            elapsed = _clock_monotonic() - _LAST_FETCH_TIME[0]
+            if elapsed < 10.0:
+                _sleep(10.0 - elapsed)
             status_code, body = fetch_url(ref.url)
+            _LAST_FETCH_TIME[0] = _clock_monotonic()
+        finally:
+            _RUN_LOCK.release()
+
         if status_code != 200:
             raise ValueError(f"Failed to fetch {ref.platform} product page (HTTP {status_code})")
 
@@ -192,43 +211,41 @@ def autofill_product_url(
 
     # Fallback to Gemini if any field is missing, key is set, and under monthly cap
     missing_fields = not all([brand, pack_label, family_key, category])
-    if (
-        missing_fields
-        and settings.gemini_api_key
-        and not gemini.is_monthly_cap_reached(session, household_id, settings.llm_monthly_cap_paise, now)
-    ):
-        gemini_data, p_tok, r_tok, cost = gemini.call_gemini_extract(
-            settings.gemini_api_key,
-            settings.gemini_model,
-            title,
-        )
-        if p_tok > 0 or r_tok > 0:
-            usage = LlmUsage(
-                household_id=household_id,
-                provider="gemini",
-                model=settings.gemini_model,
-                prompt_tokens=p_tok,
-                response_tokens=r_tok,
-                total_tokens=p_tok + r_tok,
-                cost_paise=cost,
-                created_at=now,
-            )
-            session.add(usage)
-            session.commit()
+    if missing_fields and settings.gemini_api_key:
+        with gemini._GEMINI_LOCK:
+            if not gemini.is_monthly_cap_reached(session, household_id, settings.llm_monthly_cap_paise, now):
+                gemini_data, p_tok, r_tok, cost = gemini.call_gemini_extract(
+                    settings.gemini_api_key,
+                    settings.gemini_model,
+                    title,
+                )
+                if p_tok > 0 or r_tok > 0:
+                    usage = LlmUsage(
+                        household_id=household_id,
+                        provider="gemini",
+                        model=settings.gemini_model,
+                        prompt_tokens=p_tok,
+                        response_tokens=r_tok,
+                        total_tokens=p_tok + r_tok,
+                        cost_paise=cost,
+                        created_at=now,
+                    )
+                    session.add(usage)
+                    session.commit()
 
-        if gemini_data:
-            if not brand and gemini_data.get("brand"):
-                brand = gemini_data["brand"]
-                sources["brand"] = "gemini"
-            if not pack_label and gemini_data.get("pack_label"):
-                pack_label = gemini_data["pack_label"]
-                sources["pack_label"] = "gemini"
-            if not family_key and gemini_data.get("family_key"):
-                family_key = gemini_data["family_key"]
-                sources["family_key"] = "gemini"
-            if not category and gemini_data.get("category"):
-                category = gemini_data["category"]
-                sources["category"] = "gemini"
+                if gemini_data:
+                    if not brand and gemini_data.get("brand"):
+                        brand = gemini_data["brand"]
+                        sources["brand"] = "gemini"
+                    if not pack_label and gemini_data.get("pack_label"):
+                        pack_label = gemini_data["pack_label"]
+                        sources["pack_label"] = "gemini"
+                    if not family_key and gemini_data.get("family_key"):
+                        family_key = gemini_data["family_key"]
+                        sources["family_key"] = "gemini"
+                    if not category and gemini_data.get("category"):
+                        category = gemini_data["category"]
+                        sources["category"] = "gemini"
 
     return AutofillSuggestion(
         url=ref.url,

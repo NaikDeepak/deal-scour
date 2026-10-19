@@ -19,3 +19,17 @@ export function parseRupees(input: string): number | null {
   const [whole, frac = ''] = s.split('.')
   return Number(whole) * 100 + Number(frac.padEnd(2, '0'))
 }
+
+// Plain decimal string for <input type="number">, e.g. 27500 -> "275", 27550 -> "275.50".
+// Empty or NaN returns "".
+export function paiseToRupeesInput(paise: number): string {
+  if (typeof paise !== 'number' || Number.isNaN(paise)) return ''
+  const sign = paise < 0 ? '-' : ''
+  const abs = Math.abs(paise)
+  const rupees = Math.floor(abs / 100).toString()
+  const rest = abs % 100
+  if (rest === 0) {
+    return `${sign}${rupees}`
+  }
+  return `${sign}${rupees}.${rest.toString().padStart(2, '0')}`
+}

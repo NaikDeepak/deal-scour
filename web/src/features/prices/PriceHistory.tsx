@@ -1,7 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { useEffect, useState } from 'react'
 import { catalog, type ListingHistory } from '../../lib/api'
-import { formatINR, parseRupees } from '../../lib/money'
+import { formatINR, paiseToRupeesInput, parseRupees } from '../../lib/money'
 import { inputClass } from '../../lib/ui'
 
 export function buildSparklinePoints(
@@ -49,7 +49,7 @@ export default function PriceHistory({
       .then((h) => {
         if (!active) return
         setHistory(h)
-        setTargetInput(h.target_paise != null ? (h.target_paise / 100).toString() : '')
+        setTargetInput(h.target_paise != null ? paiseToRupeesInput(h.target_paise) : '')
         setLoading(false)
       })
       .catch((e) => {

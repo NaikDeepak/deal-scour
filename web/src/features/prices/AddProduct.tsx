@@ -6,7 +6,7 @@ import {
   type Family,
   type Platform,
 } from '../../lib/api'
-import { parseRupees } from '../../lib/money'
+import { paiseToRupeesInput, parseRupees } from '../../lib/money'
 import { Card, ErrorNote, inputClass, SectionTitle } from '../../lib/ui'
 
 const CATEGORIES = [
@@ -148,8 +148,8 @@ export default function AddProduct({ onAdded }: { onAdded: () => void }) {
         category: sug.category || 'dairy',
         family: sug.family_key,
         newFamily: sug.family_key,
-        price: sug.listed_paise != null ? (sug.listed_paise / 100).toString() : '',
-        mrp: sug.mrp_paise != null ? (sug.mrp_paise / 100).toString() : '',
+        price: sug.listed_paise != null ? paiseToRupeesInput(sug.listed_paise) : '',
+        mrp: sug.mrp_paise != null ? paiseToRupeesInput(sug.mrp_paise) : '',
         member: '',
         inStock: sug.in_stock != null ? sug.in_stock : true,
         sources: sug.sources,
@@ -229,23 +229,45 @@ export default function AddProduct({ onAdded }: { onAdded: () => void }) {
     try {
       const res = await catalog.bulkAutofill(urls)
       setBulkRows(
-        res.suggestions.map((s, idx) => ({
-          id: `bulk-${idx}-${s.sku}`,
-          url: s.url,
-          platform: s.platform,
-          title: s.title,
-          brand: s.brand,
-          pack: s.pack_label,
-          category: s.category || 'dairy',
-          family: s.family_key,
-          price: s.listed_paise != null ? (s.listed_paise / 100).toString() : '',
-          mrp: s.mrp_paise != null ? (s.mrp_paise / 100).toString() : '',
-          inStock: s.in_stock != null ? s.in_stock : true,
-          sources: s.sources,
-          saved: false,
-          saving: false,
-          error: null,
-        }))
+        res.results.map((r, idx) => {
+          const s = r.suggestion
+          if (!s) {
+            return {
+              id: `bulk-${idx}-err`,
+              url: r.url,
+              platform: 'amazon' as Platform,
+              title: r.url,
+              brand: '',
+              pack: '',
+              category: 'dairy',
+              family: '',
+              price: '',
+              mrp: '',
+              inStock: false,
+              sources: {},
+              saved: false,
+              saving: false,
+              error: r.error || 'Failed to parse',
+            }
+          }
+          return {
+            id: `bulk-${idx}-${s.sku}`,
+            url: s.url,
+            platform: s.platform,
+            title: s.title,
+            brand: s.brand,
+            pack: s.pack_label,
+            category: s.category || 'dairy',
+            family: s.family_key,
+            price: s.listed_paise != null ? paiseToRupeesInput(s.listed_paise) : '',
+            mrp: s.mrp_paise != null ? paiseToRupeesInput(s.mrp_paise) : '',
+            inStock: s.in_stock != null ? s.in_stock : true,
+            sources: s.sources,
+            saved: false,
+            saving: false,
+            error: null,
+          }
+        })
       )
     } catch (e) {
       setError((e as Error).message.replace(/^\d+: /, ''))
@@ -514,14 +536,17 @@ export default function AddProduct({ onAdded }: { onAdded: () => void }) {
             <span className="text-xs text-slate-500">
               {parseBulkUrls(bulkText).length} links ready (max 20)
             </span>
-            <button
-              type="button"
-              disabled={bulkLoading || parseBulkUrls(bulkText).length === 0}
-              onClick={fillBulk}
-              className="rounded-xl bg-orange-700 px-3.5 py-2 text-xs font-bold text-white hover:bg-orange-800 disabled:opacity-40"
-            >
-              {bulkLoading ? 'Filling links…' : 'Fill links'}
-            </button>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-slate-400">About 10 s per link</span>
+              <button
+                type="button"
+                disabled={bulkLoading || parseBulkUrls(bulkText).length === 0}
+                onClick={fillBulk}
+                className="rounded-xl bg-orange-700 px-3.5 py-2 text-xs font-bold text-white hover:bg-orange-800 disabled:opacity-40"
+              >
+                {bulkLoading ? 'Filling links…' : 'Fill links'}
+              </button>
+            </div>
           </div>
 
           {bulkRows.length > 0 && (

@@ -97,11 +97,13 @@ def get_deals_feed(
         ).all()
 
         low_30d: Paise | None = None
+        high_30d: Paise | None = None
         avg_30d: Paise | None = None
         if obs_30d:
             prices = [o.listed_paise for o in obs_30d]
             low_30d = min(prices)
-            avg_30d = round(sum(prices) / len(prices))
+            high_30d = max(prices)
+            avg_30d = (sum(prices) + len(prices) // 2) // len(prices)
 
         reasons: list[str] = []
         current_price = item.listing.listed
@@ -110,12 +112,18 @@ def get_deals_feed(
         if watch and watch.target_paise is not None and current_price <= watch.target_paise:
             reasons.append("below_target")
 
-        # Reason 2: low_30d (current <= 30-day low and >= 3 observations)
-        if len(obs_30d) >= 3 and low_30d is not None and current_price <= low_30d:
+        # Reason 2: low_30d (current <= 30-day low, >= 3 observations, and price movement in window)
+        if (
+            len(obs_30d) >= 3
+            and low_30d is not None
+            and high_30d is not None
+            and high_30d > low_30d
+            and current_price <= low_30d
+        ):
             reasons.append("low_30d")
 
-        # Reason 3: under_avg (>= 15% under 30-day average)
-        if avg_30d is not None and avg_30d > 0 and current_price <= round(avg_30d * 0.85):
+        # Reason 3: under_avg (>= 15% under 30-day average, integer money math)
+        if avg_30d is not None and avg_30d > 0 and (current_price * 100 <= avg_30d * 85):
             reasons.append("under_avg")
 
         if not reasons:

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { api, PLATFORM_META, type Deal, type Platform } from '../../lib/api'
-import { formatINR, parseRupees } from '../../lib/money'
+import { formatINR, paiseToRupeesInput, parseRupees } from '../../lib/money'
 import { usePreference } from '../../lib/preference'
 import { useProducts } from '../../lib/products'
 import { isProductPage } from '../../lib/links'
@@ -120,7 +120,7 @@ export default function PricesPage() {
 
 function PriceForm({ deal, onSaved, onError }: { deal: Deal; onSaved: () => void; onError: (e: string | null) => void }) {
   const [listed, setListed] = useState('')
-  const [mrp, setMrp] = useState(String(deal.mrp_paise / 100))
+  const [mrp, setMrp] = useState(paiseToRupeesInput(deal.mrp_paise))
   const [member, setMember] = useState('')
   const [inStock, setInStock] = useState(true)
 

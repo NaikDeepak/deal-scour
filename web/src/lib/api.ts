@@ -432,6 +432,16 @@ export interface DealFeedResponse {
   deals: DealFeedItem[]
 }
 
+export interface BulkAutofillResultItem {
+  url: string
+  suggestion?: AutofillSuggestion
+  error?: string
+}
+
+export interface BulkAutofillResponse {
+  results: BulkAutofillResultItem[]
+}
+
 export const catalog = {
   parseLink: (url: string) => call<ProductRef>('/api/v1/listings/parse', json({ url })),
   addListing: (l: NewListing) => call<{ listing_id: string; product_key: string }>('/api/v1/listings', json(l)),
@@ -440,7 +450,7 @@ export const catalog = {
   sourceStatus: () => call<{ platforms: SourceStatus[]; quick_commerce: string }>('/api/v1/sources/status'),
   autofill: (url: string) => call<AutofillSuggestion>('/api/v1/listings/autofill', json({ url })),
   bulkAutofill: (urls: string[]) =>
-    call<{ suggestions: AutofillSuggestion[] }>('/api/v1/listings/bulk', json({ urls })),
+    call<BulkAutofillResponse>('/api/v1/listings/bulk', json({ urls })),
   history: (id: string, days = 90) =>
     call<ListingHistory>(`/api/v1/listings/${encodeURIComponent(id)}/history?days=${days}`),
   setWatch: (id: string, target_paise: number | null) =>

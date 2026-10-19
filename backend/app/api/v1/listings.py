@@ -15,7 +15,7 @@ from app.domain.catalog import all_listings, compute_freshness, load_seed
 from app.domain.models import CustomListing, ListingWatch, PriceObservation
 from app.pricing.fee_schedules import Platform
 from app.pricing.units import parse_pack
-from app.sources.autofill import AutofillSuggestion, autofill_product_url
+from app.sources.autofill import AutofillSuggestion, BusyRefreshingError, autofill_product_url
 from app.sources.urls import parse_product_url
 
 router = APIRouter()
@@ -518,7 +518,7 @@ def autofill_listing(
 ) -> AutofillSuggestion:
     try:
         return autofill_product_url(req.url, household_id=household_id, session=session, now_dt=now)
-    except ValueError as e:
+    except (ValueError, BusyRefreshingError) as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
 
 
@@ -526,8 +526,14 @@ class BulkAutofillRequest(BaseModel):
     urls: list[str]
 
 
+class BulkResultItem(BaseModel):
+    url: str
+    suggestion: AutofillSuggestion | None = None
+    error: str | None = None
+
+
 class BulkAutofillResponse(BaseModel):
-    suggestions: list[AutofillSuggestion]
+    results: list[BulkResultItem]
 
 
 @router.post("/listings/bulk", response_model=BulkAutofillResponse)
@@ -540,14 +546,14 @@ def bulk_autofill_listings(
     if len(req.urls) > 20:
         raise HTTPException(status_code=422, detail="Max 20 URLs allowed")
 
-    suggestions: list[AutofillSuggestion] = []
+    results: list[BulkResultItem] = []
     for u in req.urls:
         try:
             sug = autofill_product_url(u, household_id=household_id, session=session, now_dt=now)
-            suggestions.append(sug)
-        except ValueError as e:
-            raise HTTPException(status_code=422, detail=f"Error parsing '{u}': {e}") from e
-    return BulkAutofillResponse(suggestions=suggestions)
+            results.append(BulkResultItem(url=u, suggestion=sug))
+        except Exception as e:
+            results.append(BulkResultItem(url=u, error=str(e)))
+    return BulkAutofillResponse(results=results)
 
 
 class ObservationOut(BaseModel):
@@ -598,7 +604,7 @@ def get_listing_history(
         prices = [o.listed_paise for o in obs_30d]
         low_30d = min(prices)
         high_30d = max(prices)
-        avg_30d = round(sum(prices) / len(prices))
+        avg_30d = (sum(prices) + len(prices) // 2) // len(prices)
 
     watch = session.exec(
         select(ListingWatch).where(
@@ -645,6 +651,18 @@ def put_listing_watch(
     session: SessionDep,
     now: ClockDep,
 ) -> WatchResponse:
+    seed = load_seed()
+    seed_ids = {s.id for s in seed}
+    if id not in seed_ids:
+        cl = session.exec(
+            select(CustomListing).where(
+                CustomListing.household_id == household_id,
+                CustomListing.listing_id == id,
+            )
+        ).first()
+        if cl is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Listing not found")
+
     watch = session.exec(
         select(ListingWatch).where(
             ListingWatch.household_id == household_id,

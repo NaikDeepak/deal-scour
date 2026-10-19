@@ -1,19 +1,25 @@
 import json
 import logging
 import re
+import threading
 from datetime import UTC, datetime
 from typing import Any
 
 import httpx
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 from sqlmodel import Session, func, select
 
 from app.domain.models import LlmUsage
 
 logger = logging.getLogger(__name__)
 
+MAX_CALL_COST_PAISE = 10
+_GEMINI_LOCK = threading.Lock()
+
 
 class GeminiExtraction(BaseModel):
+    model_config = ConfigDict(strict=True)
+
     brand: str | None = None
     pack_label: str | None = None
     family_key: str | None = None
@@ -114,8 +120,8 @@ class GeminiClient:
                 if v is not None and str(v).strip() != ""
             }
             return result, prompt_tokens, response_tokens, cost_paise
-        except (json.JSONDecodeError, ValidationError) as e:
-            logger.warning("Gemini output validation failed: %s", str(e))
+        except (json.JSONDecodeError, ValidationError):
+            logger.warning("Gemini output was not valid JSON")
             return None, prompt_tokens, response_tokens, cost_paise
 
 
@@ -125,7 +131,7 @@ def is_monthly_cap_reached(
     cap_paise: int,
     now: datetime,
 ) -> bool:
-    """Checks whether the household (or global) LLM spend has reached the monthly cap."""
+    """Checks whether the global LLM spend has reached the monthly cap (considering reservation)."""
     if cap_paise <= 0:
         return True
 
@@ -133,11 +139,8 @@ def is_monthly_cap_reached(
     query = select(func.coalesce(func.sum(LlmUsage.cost_paise), 0)).where(
         LlmUsage.created_at >= month_start
     )
-    if household_id is not None:
-        query = query.where(LlmUsage.household_id == household_id)
-
     total_spent_paise = session.exec(query).one()
-    return int(total_spent_paise) >= cap_paise
+    return int(total_spent_paise) + MAX_CALL_COST_PAISE > cap_paise
 
 
 def call_gemini_extract(

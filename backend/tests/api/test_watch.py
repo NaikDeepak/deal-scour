@@ -76,10 +76,10 @@ def watch_client(engine: Engine) -> Generator[TestClient, None, None]:
             s.add(auth_sess)
             s.commit()
 
-    with TestClient(app) as c:
-        c.cookies.set("ds_session", "test-persistent-session-token-for-tests-32ch")
-        c.headers["X-DealScour"] = "1"
-        yield c
+    c = TestClient(app)
+    c.cookies.set("ds_session", "test-persistent-session-token-for-tests-32ch")
+    c.headers["X-DealScour"] = "1"
+    yield c
 
 
 # 6. Bulk: 3 urls → 3 suggestions, nothing saved; > 20 → 422.
@@ -96,10 +96,10 @@ def test_bulk_autofill_limits_and_no_save(watch_client: TestClient, engine: Engi
     resp = watch_client.post("/api/v1/listings/bulk", json={"urls": urls_3})
     assert resp.status_code == 200
     data = resp.json()
-    assert len(data["suggestions"]) == 3
-    assert data["suggestions"][0]["brand"] == "Amul"
-    assert data["suggestions"][1]["brand"] == "Britannia"
-    assert data["suggestions"][2]["brand"] == "Mother Dairy"
+    assert len(data["results"]) == 3
+    assert data["results"][0]["suggestion"]["brand"] == "Amul"
+    assert data["results"][1]["suggestion"]["brand"] == "Britannia"
+    assert data["results"][2]["suggestion"]["brand"] == "Mother Dairy"
 
     # Verify nothing was saved to DB
     with Session(engine) as s:
@@ -452,3 +452,220 @@ def test_deals_feed_reasons_and_isolation(watch_client: TestClient, engine: Engi
 
     deal_c = next(d for d in feed if d["listing_id"] == "listing_c")
     assert "under_avg" in deal_c["reasons"]
+
+
+# 21. Bulk with 1 bad + 2 good urls → 200, 3 results, the bad one has error.
+def test_bulk_autofill_per_row_results(watch_client: TestClient) -> None:
+    urls = [
+        "https://blinkit.com/prn/amul-butter/prid/101",
+        "https://invalid-host.example.com/not-a-product",
+        "https://blinkit.com/prn/britannia-bread/prid/102",
+    ]
+    resp = watch_client.post("/api/v1/listings/bulk", json={"urls": urls})
+    assert resp.status_code == 200
+    results = resp.json()["results"]
+    assert len(results) == 3
+    assert results[0]["url"] == urls[0]
+    assert results[0]["suggestion"] is not None
+    assert results[0]["error"] is None
+
+    assert results[1]["url"] == urls[1]
+    assert results[1]["suggestion"] is None
+    assert results[1]["error"] is not None
+
+    assert results[2]["url"] == urls[2]
+    assert results[2]["suggestion"] is not None
+    assert results[2]["error"] is None
+
+
+# 22. Flat price ×3 → no low_30d; 300, 320, 290 (current 290) → low_30d.
+def test_low_30d_requires_price_movement(watch_client: TestClient, engine: Engine) -> None:
+    with Session(engine) as s:
+        cl_flat = CustomListing(
+            household_id=1,
+            listing_id="listing_flat",
+            platform="amazon",
+            sku="B00000FLAT",
+            url="https://www.amazon.in/dp/B00000FLAT",
+            title="Flat Price Product",
+            brand="Amul",
+            pack_label="500g",
+            category="dairy",
+            product_key="prod_flat",
+            family_key="butter",
+            created_at=FIXED_NOW,
+        )
+        s.add(cl_flat)
+        for i in range(3):
+            s.add(PriceObservation(
+                household_id=1,
+                listing_id="listing_flat",
+                listed_paise=30000,
+                mrp_paise=35000,
+                in_stock=True,
+                source="fetcher",
+                observed_at=FIXED_NOW - timedelta(days=3 - i),
+            ))
+
+        cl_moved = CustomListing(
+            household_id=1,
+            listing_id="listing_moved",
+            platform="amazon",
+            sku="B0000MOVED",
+            url="https://www.amazon.in/dp/B0000MOVED",
+            title="Price Moved Product",
+            brand="Amul",
+            pack_label="500g",
+            category="dairy",
+            product_key="prod_moved",
+            family_key="butter",
+            created_at=FIXED_NOW,
+        )
+        s.add(cl_moved)
+        for i, price in enumerate([30000, 32000, 29000]):
+            s.add(PriceObservation(
+                household_id=1,
+                listing_id="listing_moved",
+                listed_paise=price,
+                mrp_paise=35000,
+                in_stock=True,
+                source="fetcher",
+                observed_at=FIXED_NOW - timedelta(days=3 - i),
+            ))
+        s.commit()
+
+    res = watch_client.get("/api/v1/deals/feed")
+    assert res.status_code == 200
+    feed = res.json()["deals"]
+
+    flat_deal = next((d for d in feed if d["listing_id"] == "listing_flat"), None)
+    if flat_deal:
+        assert "low_30d" not in flat_deal["reasons"]
+
+    moved_deal = next(d for d in feed if d["listing_id"] == "listing_moved")
+    assert "low_30d" in moved_deal["reasons"]
+
+
+# 23. avg of [100, 101] paise = 101 (integer rounding half up); 85.0% exactly under → under_avg.
+def test_integer_money_averages_and_under_avg(watch_client: TestClient, engine: Engine) -> None:
+    listing_id = "listing_int_avg"
+    with Session(engine) as s:
+        cl = CustomListing(
+            household_id=1,
+            listing_id=listing_id,
+            platform="amazon",
+            sku="B000INTAVG",
+            url="https://www.amazon.in/dp/B000INTAVG",
+            title="Integer Avg Test",
+            brand="Amul",
+            pack_label="500g",
+            category="dairy",
+            product_key="prod_int_avg",
+            family_key="butter",
+            created_at=FIXED_NOW,
+        )
+        s.add(cl)
+        s.add(PriceObservation(
+            household_id=1,
+            listing_id=listing_id,
+            listed_paise=100,
+            mrp_paise=200,
+            in_stock=True,
+            source="fetcher",
+            observed_at=FIXED_NOW - timedelta(days=2),
+        ))
+        s.add(PriceObservation(
+            household_id=1,
+            listing_id=listing_id,
+            listed_paise=101,
+            mrp_paise=200,
+            in_stock=True,
+            source="fetcher",
+            observed_at=FIXED_NOW - timedelta(days=1),
+        ))
+        s.commit()
+
+    hist = watch_client.get(f"/api/v1/listings/{listing_id}/history").json()
+    assert hist["avg_30d"] == 101
+
+    listing_85 = "listing_85_pct"
+    with Session(engine) as s:
+        cl85 = CustomListing(
+            household_id=1,
+            listing_id=listing_85,
+            platform="amazon",
+            sku="B000000085",
+            url="https://www.amazon.in/dp/B000000085",
+            title="85 Pct Item",
+            brand="Amul",
+            pack_label="500g",
+            category="dairy",
+            product_key="prod_85",
+            family_key="butter",
+            created_at=FIXED_NOW,
+        )
+        s.add(cl85)
+        s.add(PriceObservation(
+            household_id=1,
+            listing_id=listing_85,
+            listed_paise=11000,
+            mrp_paise=12000,
+            in_stock=True,
+            source="fetcher",
+            observed_at=FIXED_NOW - timedelta(days=5),
+        ))
+        s.add(PriceObservation(
+            household_id=1,
+            listing_id=listing_85,
+            listed_paise=10500,
+            mrp_paise=12000,
+            in_stock=True,
+            source="fetcher",
+            observed_at=FIXED_NOW - timedelta(days=3),
+        ))
+        s.add(PriceObservation(
+            household_id=1,
+            listing_id=listing_85,
+            listed_paise=8500,
+            mrp_paise=12000,
+            in_stock=True,
+            source="fetcher",
+            observed_at=FIXED_NOW - timedelta(hours=1),
+        ))
+        s.commit()
+
+    feed_res = watch_client.get("/api/v1/deals/feed").json()["deals"]
+    deal_85 = next(d for d in feed_res if d["listing_id"] == listing_85)
+    assert "under_avg" in deal_85["reasons"]
+
+
+# 26. PUT watch on "nope" → 404; on another household's custom listing → 404.
+def test_put_watch_only_real_and_owned_listings(watch_client: TestClient, engine: Engine) -> None:
+    res_nope = watch_client.put("/api/v1/listings/nope/watch", json={"target_paise": 1000})
+    assert res_nope.status_code == 404
+
+    with Session(engine) as s:
+        h2 = Household(id=2, name="Other Household", pincode="560001")
+        s.add(h2)
+        s.commit()
+
+        cl_h2 = CustomListing(
+            household_id=2,
+            listing_id="h2_secret_listing",
+            platform="amazon",
+            sku="B0000000H2S",
+            url="https://www.amazon.in/dp/B0000000H2S",
+            title="Household 2 Secret Item",
+            brand="Amul",
+            pack_label="500g",
+            category="dairy",
+            product_key="prod_h2_secret",
+            family_key="butter",
+            created_at=FIXED_NOW,
+        )
+        s.add(cl_h2)
+        s.commit()
+
+    res_h2 = watch_client.put("/api/v1/listings/h2_secret_listing/watch", json={"target_paise": 1000})
+    assert res_h2.status_code == 404
+
