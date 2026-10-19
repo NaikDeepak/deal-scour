@@ -578,6 +578,7 @@ class QuickBundleResponse(BaseModel):
     list_id: int
     bundle: str
     added_needs: int
+    unpriced_families: list[str] = Field(default_factory=list)
 
 
 @router.post("/lists/{id}/quick-bundle", response_model=QuickBundleResponse)
@@ -586,7 +587,6 @@ def apply_quick_bundle(
     req: QuickBundleRequest,
     household_id: HouseholdIdDep,
     session: SessionDep,
-    now_dt: ClockDep,
 ) -> QuickBundleResponse:
     from app.domain.bundles import apply_dryfruits_500g_bundle
 
@@ -602,11 +602,15 @@ def apply_quick_bundle(
             detail="List not found",
         )
 
-    added = apply_dryfruits_500g_bundle(
+    added, unpriced = apply_dryfruits_500g_bundle(
         session=session,
         household_id=household_id,
         list_id=id,
-        now_dt=now_dt,
     )
-    return QuickBundleResponse(list_id=id, bundle=req.bundle, added_needs=added)
+    return QuickBundleResponse(
+        list_id=id,
+        bundle=req.bundle,
+        added_needs=added,
+        unpriced_families=unpriced,
+    )
 

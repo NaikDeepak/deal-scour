@@ -6,6 +6,38 @@ export interface CartTargetItem {
   packs: number
   platform: Platform
   url: string
+  autoClick: boolean
+}
+
+export interface CartItemResult {
+  title: string
+  status: 'added' | 'opened for you' | 'failed'
+  detail?: string
+}
+
+export function isProductPageUrl(url: string): boolean {
+  if (!url) return false
+  try {
+    const parsed = new URL(url)
+    const path = parsed.pathname
+    if (path.includes('/dp/') || path.includes('/gp/product/')) return true
+    if (path.includes('/p/') && (parsed.searchParams.has('pid') || /\/p\/itm/i.test(path))) return true
+    if (path.includes('/prid/')) return true
+    if (path.includes('/pvid/')) return true
+    if (path.includes('/instamart/item/')) return true
+    return false
+  } catch {
+    return false
+  }
+}
+
+export function categorizeCartResult(r: { added?: boolean; reason?: string }): 'added' | 'opened for you' | 'failed' {
+  if (r.added) return 'added'
+  const reason = (r.reason || '').toLowerCase()
+  if (reason.includes('search page') || reason.includes('tab left open') || reason.includes('opened tab')) {
+    return 'opened for you'
+  }
+  return 'failed'
 }
 
 export function fallbackSearchUrl(platform: Platform, query: string): string {
@@ -34,6 +66,7 @@ export function buildCartItemsFromOrder(order: OrderOut, dealById?: Map<string, 
       packs: line.packs,
       platform: order.platform,
       url: resolvedUrl,
+      autoClick: isProductPageUrl(resolvedUrl),
     }
   })
 }
@@ -49,27 +82,67 @@ export function buildCartItemsFromBasket(basket: Basket, deals: Deal[]): CartTar
       packs: line.packs,
       platform: basket.platform,
       url: resolvedUrl,
+      autoClick: isProductPageUrl(resolvedUrl),
     }
   })
 }
 
-export function triggerAddToCart(
+export async function triggerAddToCart(
   items: CartTargetItem[],
   extReady: boolean,
   onStatus?: (msg: string) => void,
-): void {
-  if (items.length === 0) return
+): Promise<CartItemResult[]> {
+  if (items.length === 0) return []
 
   if (extReady && typeof window !== 'undefined') {
     onStatus?.(`Auto-adding ${items.length} item(s) to cart via DealScour Extension…`)
-    window.postMessage(
-      {
-        type: 'DEALSCOUR_ADD_TO_CART_REQUEST',
-        items,
-      },
-      window.location.origin,
-    )
-    return
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        window.removeEventListener('message', handler)
+        resolve(
+          items.map((it) => ({
+            title: it.title,
+            status: 'failed',
+            detail: 'Extension timed out',
+          })),
+        )
+      }, Math.max(20000, items.length * 15000))
+
+      function handler(e: MessageEvent) {
+        if (e.source !== window || !e.data || typeof e.data.type !== 'string') return
+        if (e.data.type === 'DEALSCOUR_ADD_TO_CART_COMPLETE') {
+          clearTimeout(timeout)
+          window.removeEventListener('message', handler)
+          const rawResults = (e.data.results as Array<{ title?: string; added?: boolean; reason?: string }>) ?? []
+          const mapped: CartItemResult[] = items.map((item, idx) => {
+            const raw = rawResults[idx] || rawResults.find((r) => r.title === item.title)
+            if (!raw) return { title: item.title, status: 'failed', detail: 'No result returned' }
+            const status = categorizeCartResult(raw)
+            return { title: item.title, status, detail: raw.reason }
+          })
+          resolve(mapped)
+        } else if (e.data.type === 'DEALSCOUR_ADD_TO_CART_ERROR') {
+          clearTimeout(timeout)
+          window.removeEventListener('message', handler)
+          resolve(
+            items.map((it) => ({
+              title: it.title,
+              status: 'failed',
+              detail: String(e.data.error ?? 'Extension error'),
+            })),
+          )
+        }
+      }
+
+      window.addEventListener('message', handler)
+      window.postMessage(
+        {
+          type: 'DEALSCOUR_ADD_TO_CART_REQUEST',
+          items,
+        },
+        window.location.origin,
+      )
+    })
   }
 
   // Fallback when extension is not installed: launch each item's URL in a new tab
@@ -77,4 +150,9 @@ export function triggerAddToCart(
   for (const item of items) {
     window.open(item.url, '_blank', 'noopener,noreferrer')
   }
+  return items.map((item) => ({
+    title: item.title,
+    status: 'opened for you',
+    detail: 'Opened in a new tab',
+  }))
 }

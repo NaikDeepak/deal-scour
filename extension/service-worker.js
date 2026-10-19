@@ -1,7 +1,31 @@
 // DealScour MV3 Background Service Worker
 // Handles:
-// 1. DEALSCOUR_RUN_SCOUR: Sequential background tab price extraction across 5 portals
+// 1. DEALSCOUR_RUN_SCOUR: Sequential background tab price extraction across supported portals
 // 2. DEALSCOUR_RUN_ADD_TO_CART: Sequential auto-add basket items to portal carts
+
+importScripts('lib.js');
+
+const lastOpenTimeByHost = new Map();
+
+async function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function throttleHost(urlStr) {
+  try {
+    const parsed = new URL(urlStr);
+    const host = parsed.hostname.toLowerCase();
+    const now = Date.now();
+    const lastTime = lastOpenTimeByHost.get(host) || 0;
+    const elapsed = now - lastTime;
+    if (elapsed < 8000) {
+      await sleep(8000 - elapsed);
+    }
+    lastOpenTimeByHost.set(host, Date.now());
+  } catch {
+    // ignore parse error
+  }
+}
 
 async function waitForTabComplete(tabId, timeoutMs = 12000) {
   return new Promise((resolve) => {
@@ -25,6 +49,7 @@ async function waitForTabComplete(tabId, timeoutMs = 12000) {
 async function scourSingleTarget(target) {
   let tabId = null;
   try {
+    await throttleHost(target.url);
     const createdTab = await chrome.tabs.create({ url: target.url, active: false });
     tabId = createdTab.id;
     if (!tabId) {
@@ -34,7 +59,7 @@ async function scourSingleTarget(target) {
     await waitForTabComplete(tabId, 12000);
     await chrome.scripting.executeScript({
       target: { tabId },
-      files: ['extractors.js'],
+      files: ['lib.js', 'extractors.js'],
     });
     const injectionResults = await chrome.scripting.executeScript({
       target: { tabId },
@@ -43,7 +68,7 @@ async function scourSingleTarget(target) {
 
     const extracted = injectionResults && injectionResults[0] ? injectionResults[0].result : null;
     if (!extracted || !extracted.listed_paise) {
-      return { listing_id: target.listing_id, ok: false, error: 'Price not found on page' };
+      return { listing_id: target.listing_id, ok: false, error: "Couldn't read the price on this page" };
     }
     return {
       listing_id: target.listing_id,
@@ -70,22 +95,34 @@ async function scourSingleTarget(target) {
 async function addSingleItemToCart(item, isLastItem) {
   let tabId = null;
   try {
+    await throttleHost(item.url);
+    const isProduct = isProductPageUrl(item.url);
     const createdTab = await chrome.tabs.create({ url: item.url, active: isLastItem });
     tabId = createdTab.id;
     if (!tabId) {
-      return { title: item.title, added: false, reason: 'Failed to open tab' };
+      return { title: item.title, platform: item.platform, added: false, reason: 'Failed to open tab' };
+    }
+
+    if (!isProduct) {
+      return {
+        title: item.title,
+        platform: item.platform,
+        added: false,
+        reason: 'Search page: pick the product yourself',
+      };
     }
 
     await waitForTabComplete(tabId, 12000);
     await chrome.scripting.executeScript({
       target: { tabId },
-      files: ['cart-adder.js'],
+      files: ['lib.js', 'cart-adder.js'],
     });
     const packs = Number(item.packs) > 0 ? Number(item.packs) : 1;
     const injectionResults = await chrome.scripting.executeScript({
       target: { tabId },
-      func: (p) => (typeof addDealScourItemToCart === 'function' ? addDealScourItemToCart(p) : { added: false }),
-      args: [packs],
+      func: (p, u) =>
+        typeof addDealScourItemToCart === 'function' ? addDealScourItemToCart(p, u) : { added: false },
+      args: [packs, item.url],
     });
     const res = injectionResults && injectionResults[0] ? injectionResults[0].result : { added: false };
     if (res && res.added && !isLastItem) {
@@ -113,7 +150,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'DEALSCOUR_RUN_SCOUR') {
     (async () => {
-      const targets = Array.isArray(message.targets) ? message.targets : [];
+      // Max 15 targets per scour run
+      const allTargets = Array.isArray(message.targets) ? message.targets : [];
+      const targets = allTargets.slice(0, 15);
       const results = [];
       await chrome.storage.local.set({ lastScourCount: targets.length });
 
@@ -133,6 +172,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             // portal tab may have navigated
           }
         }
+
+        // Refuse unsupported shop links
+        if (!isAllowedUrl(target.url)) {
+          results.push({
+            listing_id: target.listing_id,
+            ok: false,
+            error: 'Not a supported shop link',
+          });
+          continue;
+        }
+
         const res = await scourSingleTarget(target);
         results.push(res);
       }
@@ -144,7 +194,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'DEALSCOUR_RUN_ADD_TO_CART') {
     (async () => {
-      const items = Array.isArray(message.items) ? message.items : [];
+      // Max 15 items per add-to-cart run
+      const allItems = Array.isArray(message.items) ? message.items : [];
+      const items = allItems.slice(0, 15);
       const results = [];
       await chrome.storage.local.set({ lastCartItemCount: items.length });
 
@@ -163,6 +215,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             // ignore
           }
         }
+
+        // Refuse unsupported shop links
+        if (!isAllowedUrl(item.url)) {
+          results.push({
+            title: item.title,
+            platform: item.platform,
+            added: false,
+            reason: 'Not a supported shop link',
+          });
+          continue;
+        }
+
         const isLast = i === items.length - 1;
         const res = await addSingleItemToCart(item, isLast);
         results.push(res);

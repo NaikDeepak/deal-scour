@@ -1,35 +1,14 @@
 // Injected into the target platform tab by service-worker.js to add an item (× packs) to cart.
 // Never enters credentials or submits payment (ADR-020); stops after adding to cart.
-async function addDealScourItemToCart(packs = 1) {
+async function addDealScourItemToCart(packs = 1, itemUrl = '') {
   function sleep(ms) {
     return new Promise((r) => setTimeout(r, ms));
   }
 
-  function findClickableAddButton() {
-    const selectors = [
-      '#add-to-cart-button',
-      'input#add-to-cart-button',
-      'button[name="submit.add-to-cart"]',
-      '[data-testid*="add-to-cart"]',
-      '[data-test-id*="add-button"]',
-      'button',
-      'div[role="button"]',
-    ];
-
-    for (const sel of selectors.slice(0, 5)) {
-      const el = document.querySelector(sel);
-      if (el && el.offsetParent !== null) return el;
-    }
-
-    const candidates = document.querySelectorAll('button, div[role="button"], span[role="button"]');
-    for (const el of candidates) {
-      if (el.offsetParent === null) continue;
-      const text = (el.textContent || '').trim();
-      if (/^(add to cart|add to bag|add|\+\s*add)$/i.test(text)) {
-        return el;
-      }
-    }
-    return null;
+  const urlToCheck = itemUrl || window.location.href;
+  const isProduct = typeof isProductPageUrl === 'function' ? isProductPageUrl(urlToCheck) : true;
+  if (!isProduct) {
+    return { added: false, reason: 'Search page: pick the product yourself' };
   }
 
   function findIncrementButton() {
@@ -57,7 +36,14 @@ async function addDealScourItemToCart(packs = 1) {
     }
   }
 
-  const addBtn = findClickableAddButton();
+  const allCandidates = Array.from(
+    document.querySelectorAll(
+      'button, input[type="submit"], input[type="button"], div[role="button"], span[role="button"], a[role="button"]',
+    ),
+  );
+  const picker = typeof pickAddButton === 'function' ? pickAddButton : null;
+  const addBtn = picker ? picker(allCandidates) : null;
+
   if (!addBtn) {
     return { added: false, reason: 'Add-to-Cart button not found on page; tab left open for 1-click add' };
   }

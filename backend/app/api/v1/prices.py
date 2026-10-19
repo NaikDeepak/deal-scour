@@ -8,8 +8,9 @@ from sqlmodel import Session, col, select
 from app.core import clock
 from app.core.db import current_household_id, get_session
 from app.core.money import Paise
-from app.domain.catalog import all_listings
+from app.domain.catalog import SeedListing, all_listings
 from app.domain.models import PriceObservation
+from app.sources.urls import parse_product_url
 
 router = APIRouter()
 
@@ -100,6 +101,7 @@ class PriceCaptureCreate(BaseModel):
     in_stock: bool = True
     eta_minutes: int | None = None
     note: str | None = Field(default=None, max_length=120)
+    confirm: bool = False
 
     @model_validator(mode="after")
     def validate_capture(self) -> "PriceCaptureCreate":
@@ -134,26 +136,67 @@ def capture_price_observation(
     catalog_items = all_listings(session=session, household_id=household_id)
     by_id = {item.id: item for item in catalog_items}
 
-    resolved_id: str | None = None
+    resolved_item: SeedListing | None = None
     if req.listing_id is not None:
-        if req.listing_id not in by_id:
+        resolved_item = by_id.get(req.listing_id)
+        if resolved_item is None:
             raise HTTPException(status_code=422, detail=f"Unknown listing_id: {req.listing_id}")
-        resolved_id = req.listing_id
     elif req.url is not None:
-        norm_url = req.url.strip().rstrip("/")
+        try:
+            canonical_req_url = parse_product_url(req.url).url
+        except Exception:
+            raise HTTPException(status_code=422, detail=f"Invalid product url: {req.url}") from None
+
         for item in catalog_items:
-            if item.url.strip().rstrip("/") == norm_url:
-                resolved_id = item.id
+            try:
+                canonical_item_url = parse_product_url(item.url).url
+            except Exception:
+                continue
+            if canonical_item_url == canonical_req_url:
+                resolved_item = item
                 break
-        if resolved_id is None:
+
+        if resolved_item is None:
             raise HTTPException(status_code=422, detail=f"Unknown listing url: {req.url}")
 
-    assert resolved_id is not None
+    assert resolved_item is not None
+
+    # Only for listings whose url is a real product page: reject (422) if url fails parse_product_url
+    try:
+        parse_product_url(resolved_item.url)
+    except Exception:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Listing {resolved_item.id} url is not a valid product page: {resolved_item.url}",
+        ) from None
+
+    # Reject capture differing from latest price by > 60% in either direction unless confirm: true
+    latest_obs = session.exec(
+        select(PriceObservation)
+        .where(
+            PriceObservation.household_id == household_id,
+            PriceObservation.listing_id == resolved_item.id,
+        )
+        .order_by(
+            col(PriceObservation.observed_at).desc(),
+            col(PriceObservation.id).desc(),
+        )
+    ).first()
+
+    latest_price: int = latest_obs.listed_paise if latest_obs is not None else resolved_item.listed
+    if latest_price > 0:
+        diff = abs(req.listed_paise - latest_price) / latest_price
+        if diff > 0.60 and not req.confirm:
+            raise HTTPException(
+                status_code=422,
+                detail="Price changed a lot. Check the page and confirm.",
+            )
+
     mrp_val = req.mrp_paise if req.mrp_paise is not None else req.listed_paise
 
     obs = PriceObservation(
         household_id=household_id,
-        listing_id=resolved_id,
+        listing_id=resolved_item.id,
         listed_paise=req.listed_paise,
         mrp_paise=mrp_val,
         member_price_paise=req.member_price_paise,

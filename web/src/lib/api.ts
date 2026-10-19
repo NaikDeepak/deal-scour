@@ -268,6 +268,7 @@ export interface PriceCaptureIn {
   in_stock?: boolean
   eta_minutes?: number | null
   note?: string | null
+  confirm?: boolean
 }
 
 const json = (body: unknown): RequestInit => ({ method: 'POST', body: JSON.stringify(body) })
@@ -278,7 +279,10 @@ export const api = {
   list: (id: number) => call<ListDetail>(`/api/v1/lists/${id}`),
   scourTargets: (listId: number) => call<{ list_id: number; targets: ScourTarget[] }>(`/api/v1/lists/${listId}/scour-targets`),
   applyQuickBundle: (listId: number, bundle: 'dryfruits_500g' = 'dryfruits_500g') =>
-    call<{ list_id: number; bundle: string; added_needs: number }>(`/api/v1/lists/${listId}/quick-bundle`, json({ bundle })),
+    call<{ list_id: number; bundle: string; added_needs: number; unpriced_families: string[] }>(
+      `/api/v1/lists/${listId}/quick-bundle`,
+      json({ bundle }),
+    ),
   addNeed: (listId: number, need: Omit<NeedIn, 'line_id'> & { line_id: string }) =>
     call<SavedNeed>(`/api/v1/lists/${listId}/needs`, json(need)),
   updateNeed: (id: number, patch: Partial<SavedNeed>) =>

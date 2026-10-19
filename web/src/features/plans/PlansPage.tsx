@@ -18,7 +18,7 @@ import { formatINR } from '../../lib/money'
 import { usePreference } from '../../lib/preference'
 import { useProducts, type Product } from '../../lib/products'
 import { Card, ErrorNote, SectionTitle } from '../../lib/ui'
-import { buildCartItemsFromOrder, triggerAddToCart } from './cartBuilder'
+import { buildCartItemsFromOrder, triggerAddToCart, type CartItemResult } from './cartBuilder'
 import ComparisonMatrix from './ComparisonMatrix'
 
 const PLAN_LABELS: Record<LabelledPlanOut['label'], { title: string; blurb: string }> = {
@@ -167,11 +167,15 @@ export default function PlansPage({ onAccepted }: { onAccepted: () => void }) {
     if (listId === null) return
     void run(async () => {
       setScourNote('Loading 8 Dryfruits & Seeds (500g each) across all 5 portals + active offers…')
-      await api.applyQuickBundle(listId, 'dryfruits_500g')
+      const bundleRes = await api.applyQuickBundle(listId, 'dryfruits_500g')
       setRefreshKey((k) => k + 1)
       await Promise.all([loadList(), loadLists()])
       await executePlan(listId)
-      setScourNote('Loaded all 8 Dryfruits & Seeds (500g each) and calculated optimal split! Click any basket below to auto-fill your cart.')
+      if (bundleRes.unpriced_families && bundleRes.unpriced_families.length > 0) {
+        setScourNote(`Added bundle needs. Add a product link for: ${bundleRes.unpriced_families.join(', ')}.`)
+      } else {
+        setScourNote('Loaded all 8 Dryfruits & Seeds (500g each) and calculated optimal split!')
+      }
     })
   }
 
@@ -565,10 +569,18 @@ export function OrderCard({
 }) {
   const meta = PLATFORM_META[order.platform]
   const pending = order.status === 'pending'
+  const [cartResults, setCartResults] = useState<CartItemResult[]>([])
+  const [isAdding, setIsAdding] = useState(false)
 
-  function handleAddOrderToCart() {
+  async function handleAddOrderToCart() {
     const items = buildCartItemsFromOrder(order, dealById)
-    triggerAddToCart(items, extReady, onStatus)
+    setIsAdding(true)
+    try {
+      const results = await triggerAddToCart(items, extReady, onStatus)
+      setCartResults(results)
+    } finally {
+      setIsAdding(false)
+    }
   }
 
   return (
@@ -628,11 +640,33 @@ export function OrderCard({
       </dl>
       <button
         type="button"
+        disabled={isAdding}
         onClick={handleAddOrderToCart}
-        className="mt-3 w-full rounded-xl border border-slate-300 bg-slate-50 py-2 text-xs font-bold text-slate-900 hover:bg-slate-100"
+        className="mt-3 w-full rounded-xl border border-slate-300 bg-slate-50 py-2 text-xs font-bold text-slate-900 hover:bg-slate-100 disabled:opacity-50"
       >
-        🛒 Auto-Add {order.lines.length} Item{order.lines.length === 1 ? '' : 's'} to {meta.name} Cart
+        {isAdding ? `Adding to ${meta.name} cart…` : `Add to ${meta.name} cart`}
       </button>
+
+      {cartResults.length > 0 && (
+        <ul className="mt-2 space-y-1 rounded-xl bg-slate-50 p-2 text-xs">
+          {cartResults.map((res, idx) => (
+            <li key={idx} className="flex items-center justify-between gap-2">
+              <span className="truncate text-slate-700">{res.title}</span>
+              <span
+                className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${
+                  res.status === 'added'
+                    ? 'bg-emerald-100 text-emerald-800'
+                    : res.status === 'opened for you'
+                      ? 'bg-sky-100 text-sky-800'
+                      : 'bg-rose-100 text-rose-800'
+                }`}
+              >
+                {res.status}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
     </article>
   )
 }
