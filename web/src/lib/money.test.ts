@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatINR, parseRupees } from './money'
+import { formatINR, paiseToRupeesInput, parseRupees } from './money'
 
 // Same cases as backend tests/core/test_money.py (format_inr), so both sides render identically.
 describe('formatINR', () => {
@@ -33,5 +33,22 @@ describe('parseRupees', () => {
 
   it.each(['', 'abc', '-5', '1.234', '1e3'])('rejects %s', (input) => {
     expect(parseRupees(input)).toBeNull()
+  })
+})
+
+// 27. paiseToRupeesInput: 27500 -> '275', 27550 -> '275.50', 0 -> '0', NaN -> ''
+describe('paiseToRupeesInput', () => {
+  it.each([
+    [27500, '275'],
+    [27550, '275.50'],
+    [0, '0'],
+    [5, '0.05'],
+    [50, '0.50'],
+  ])('%i → %s', (paise, expected) => {
+    expect(paiseToRupeesInput(paise)).toBe(expected)
+  })
+
+  it('handles NaN, null, undefined', () => {
+    expect(paiseToRupeesInput(Number.NaN)).toBe('')
   })
 })

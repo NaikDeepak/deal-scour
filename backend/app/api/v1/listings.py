@@ -1,6 +1,6 @@
 import re
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -12,9 +12,10 @@ from app.core import clock
 from app.core.db import current_household_id, get_session
 from app.core.money import Paise
 from app.domain.catalog import all_listings, compute_freshness, load_seed
-from app.domain.models import CustomListing, PriceObservation
+from app.domain.models import CustomListing, ListingWatch, PriceObservation
 from app.pricing.fee_schedules import Platform
 from app.pricing.units import parse_pack
+from app.sources.autofill import AutofillSuggestion, BusyRefreshingError, autofill_product_url
 from app.sources.urls import parse_product_url
 
 router = APIRouter()
@@ -502,3 +503,201 @@ def get_catalog_families(
         for fam in sorted(family_counts.keys())
     ]
     return result
+
+
+class AutofillRequest(BaseModel):
+    url: str
+
+
+@router.post("/listings/autofill", response_model=AutofillSuggestion)
+def autofill_listing(
+    req: AutofillRequest,
+    household_id: HouseholdIdDep,
+    session: SessionDep,
+    now: ClockDep,
+) -> AutofillSuggestion:
+    try:
+        return autofill_product_url(req.url, household_id=household_id, session=session, now_dt=now)
+    except (ValueError, BusyRefreshingError) as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+
+
+class BulkAutofillRequest(BaseModel):
+    urls: list[str]
+
+
+class BulkResultItem(BaseModel):
+    url: str
+    suggestion: AutofillSuggestion | None = None
+    error: str | None = None
+
+
+class BulkAutofillResponse(BaseModel):
+    results: list[BulkResultItem]
+
+
+@router.post("/listings/bulk", response_model=BulkAutofillResponse)
+def bulk_autofill_listings(
+    req: BulkAutofillRequest,
+    household_id: HouseholdIdDep,
+    session: SessionDep,
+    now: ClockDep,
+) -> BulkAutofillResponse:
+    if len(req.urls) > 20:
+        raise HTTPException(status_code=422, detail="Max 20 URLs allowed")
+
+    results: list[BulkResultItem] = []
+    for u in req.urls:
+        try:
+            sug = autofill_product_url(u, household_id=household_id, session=session, now_dt=now)
+            results.append(BulkResultItem(url=u, suggestion=sug))
+        except Exception as e:
+            results.append(BulkResultItem(url=u, error=str(e)))
+    return BulkAutofillResponse(results=results)
+
+
+class ObservationOut(BaseModel):
+    observed_at: datetime
+    listed_paise: Paise
+    mrp_paise: Paise
+    in_stock: bool
+    source: str
+
+
+class ListingHistoryOut(BaseModel):
+    listing_id: str
+    days: int
+    low_30d: Paise | None = None
+    avg_30d: Paise | None = None
+    high_30d: Paise | None = None
+    target_paise: Paise | None = None
+    observations: list[ObservationOut]
+
+
+@router.get("/listings/{id}/history", response_model=ListingHistoryOut)
+def get_listing_history(
+    id: str,
+    household_id: HouseholdIdDep,
+    session: SessionDep,
+    now: ClockDep,
+    days: int = Query(default=90, ge=1, le=365),
+) -> ListingHistoryOut:
+    since_days = now - timedelta(days=days)
+    since_30d = now - timedelta(days=30)
+
+    obs_list = session.exec(
+        select(PriceObservation)
+        .where(
+            PriceObservation.household_id == household_id,
+            PriceObservation.listing_id == id,
+            PriceObservation.observed_at >= since_days,
+        )
+        .order_by(col(PriceObservation.observed_at).desc())
+    ).all()
+
+    # 30-day window stats
+    obs_30d = [o for o in obs_list if o.observed_at >= since_30d and o.source != "sample"]
+    low_30d: Paise | None = None
+    avg_30d: Paise | None = None
+    high_30d: Paise | None = None
+    if obs_30d:
+        prices = [o.listed_paise for o in obs_30d]
+        low_30d = min(prices)
+        high_30d = max(prices)
+        avg_30d = (sum(prices) + len(prices) // 2) // len(prices)
+
+    watch = session.exec(
+        select(ListingWatch).where(
+            ListingWatch.household_id == household_id,
+            ListingWatch.listing_id == id,
+        )
+    ).first()
+
+    return ListingHistoryOut(
+        listing_id=id,
+        days=days,
+        low_30d=low_30d,
+        avg_30d=avg_30d,
+        high_30d=high_30d,
+        target_paise=watch.target_paise if watch else None,
+        observations=[
+            ObservationOut(
+                observed_at=o.observed_at,
+                listed_paise=o.listed_paise,
+                mrp_paise=o.mrp_paise,
+                in_stock=o.in_stock,
+                source=o.source,
+            )
+            for o in obs_list
+        ],
+    )
+
+
+class WatchTargetRequest(BaseModel):
+    target_paise: Paise | None = None
+
+
+class WatchResponse(BaseModel):
+    listing_id: str
+    target_paise: Paise | None = None
+    watched: bool
+
+
+@router.put("/listings/{id}/watch", response_model=WatchResponse)
+def put_listing_watch(
+    id: str,
+    req: WatchTargetRequest,
+    household_id: HouseholdIdDep,
+    session: SessionDep,
+    now: ClockDep,
+) -> WatchResponse:
+    seed = load_seed()
+    seed_ids = {s.id for s in seed}
+    if id not in seed_ids:
+        cl = session.exec(
+            select(CustomListing).where(
+                CustomListing.household_id == household_id,
+                CustomListing.listing_id == id,
+                col(CustomListing.archived).is_(False),
+            )
+        ).first()
+        if cl is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Listing not found")
+
+    watch = session.exec(
+        select(ListingWatch).where(
+            ListingWatch.household_id == household_id,
+            ListingWatch.listing_id == id,
+        )
+    ).first()
+    if watch:
+        watch.target_paise = req.target_paise
+    else:
+        watch = ListingWatch(
+            household_id=household_id,
+            listing_id=id,
+            target_paise=req.target_paise,
+            created_at=now,
+        )
+    session.add(watch)
+    session.commit()
+    return WatchResponse(listing_id=id, target_paise=req.target_paise, watched=True)
+
+
+@router.delete("/listings/{id}/watch", response_model=WatchResponse)
+def delete_listing_watch(
+    id: str,
+    household_id: HouseholdIdDep,
+    session: SessionDep,
+) -> WatchResponse:
+    watch = session.exec(
+        select(ListingWatch).where(
+            ListingWatch.household_id == household_id,
+            ListingWatch.listing_id == id,
+        )
+    ).first()
+    if watch:
+        session.delete(watch)
+        session.commit()
+    return WatchResponse(listing_id=id, target_paise=None, watched=False)
+

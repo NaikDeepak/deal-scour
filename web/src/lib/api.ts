@@ -373,10 +373,98 @@ export interface SourceStatus {
   last_error: string | null
 }
 
+export interface AutofillSuggestion {
+  url: string
+  platform: Platform
+  sku: string
+  title: string
+  brand: string
+  pack_label: string
+  category: string
+  family_key: string
+  listed_paise: number | null
+  mrp_paise: number | null
+  in_stock: boolean | null
+  sources: Record<string, string>
+}
+
+export interface ObservationOut {
+  observed_at: string
+  listed_paise: number
+  mrp_paise: number
+  in_stock: boolean
+  source: string
+}
+
+export interface ListingHistory {
+  listing_id: string
+  days: number
+  low_30d: number | null
+  avg_30d: number | null
+  high_30d: number | null
+  target_paise: number | null
+  observations: ObservationOut[]
+}
+
+export interface DealFeedItem {
+  listing_id: string
+  title: string
+  brand: string
+  pack_label: string
+  platform: Platform
+  url: string
+  category: string
+  family_key: string
+  icon: string
+  listed_paise: number
+  mrp_paise: number
+  target_paise: number | null
+  avg_30d_paise: number | null
+  low_30d_paise: number | null
+  saving_pct: number
+  reasons: string[]
+  observed_at: string
+  freshness: string
+}
+
+export interface DealFeedResponse {
+  count: number
+  deals: DealFeedItem[]
+}
+
+export interface BulkAutofillResultItem {
+  url: string
+  suggestion?: AutofillSuggestion
+  error?: string
+}
+
+export interface BulkAutofillResponse {
+  results: BulkAutofillResultItem[]
+}
+
 export const catalog = {
   parseLink: (url: string) => call<ProductRef>('/api/v1/listings/parse', json({ url })),
   addListing: (l: NewListing) => call<{ listing_id: string; product_key: string }>('/api/v1/listings', json(l)),
   families: () => call<Family[]>('/api/v1/catalog/families'),
   refreshPrices: () => call<{ queued: number }>('/api/v1/sources/refresh', { method: 'POST' }),
   sourceStatus: () => call<{ platforms: SourceStatus[]; quick_commerce: string }>('/api/v1/sources/status'),
+  autofill: (url: string) => call<AutofillSuggestion>('/api/v1/listings/autofill', json({ url })),
+  bulkAutofill: (urls: string[]) =>
+    call<BulkAutofillResponse>('/api/v1/listings/bulk', json({ urls })),
+  history: (id: string, days = 90) =>
+    call<ListingHistory>(`/api/v1/listings/${encodeURIComponent(id)}/history?days=${days}`),
+  setWatch: (id: string, target_paise: number | null) =>
+    call<{ listing_id: string; target_paise: number | null; watched: boolean }>(
+      `/api/v1/listings/${encodeURIComponent(id)}/watch`,
+      { method: 'PUT', ...json({ target_paise }) },
+    ),
+  deleteWatch: (id: string) =>
+    call<{ listing_id: string; watched: boolean }>(
+      `/api/v1/listings/${encodeURIComponent(id)}/watch`,
+      { method: 'DELETE' },
+    ),
+}
+
+export const dealsApi = {
+  feed: () => call<DealFeedResponse>('/api/v1/deals/feed'),
 }

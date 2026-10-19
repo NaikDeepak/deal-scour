@@ -137,6 +137,8 @@ erDiagram
 | `ledger_entry` | id, household_id, basket_id, kind (`paid`/`cashback_expected`/`cashback_received`/`cashback_missed`/`settle_up`), amount, counterparty_household_id?, at |
 | `notification` | id, user_id, kind, dedupe_key UNIQUE, payload, channel, sent_at |
 | `job_run` | job, started_at, finished_at, status, stats JSON (lock and audit) |
+| `listing_watch` (built) | id, household_id, listing_id, target_paise?, created_at · UNIQUE(household_id, listing_id). Phase-1 form of `watch`: one listing, optional target |
+| `llm_usage` (built) | id, household_id?, provider, model, prompt_tokens, response_tokens, total_tokens, cost_paise, created_at. The monthly LLM cap sums this across all households |
 
 **Current price** is a view: the latest `price_observation` per listing, with `age = now − observed_at`. Freshness bands:
 `fresh` < 6 h, `ok` < 48 h, `stale` beyond that. Quick-commerce prices go stale faster (the threshold is configurable per platform).

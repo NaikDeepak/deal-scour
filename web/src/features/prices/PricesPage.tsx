@@ -1,12 +1,13 @@
 import { useMemo, useState } from 'react'
 import { api, PLATFORM_META, type Deal, type Platform } from '../../lib/api'
-import { formatINR, parseRupees } from '../../lib/money'
+import { formatINR, paiseToRupeesInput, parseRupees } from '../../lib/money'
 import { usePreference } from '../../lib/preference'
 import { useProducts } from '../../lib/products'
 import { isProductPage } from '../../lib/links'
 import { Card, ErrorNote, inputClass, SectionTitle } from '../../lib/ui'
 import AddProduct from './AddProduct'
 import FetcherStatus from './FetcherStatus'
+import PriceHistory from './PriceHistory'
 
 const FRESHNESS: Record<Deal['freshness'], { label: string; className: string }> = {
   fresh: { label: 'Fresh', className: 'bg-emerald-100 text-emerald-800' },
@@ -29,6 +30,7 @@ export default function PricesPage() {
   const { deals } = useProducts(members, reload)
   const [query, setQuery] = useState('')
   const [editing, setEditing] = useState<string | null>(null)
+  const [showHistory, setShowHistory] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const shown = useMemo(() => {
@@ -78,11 +80,27 @@ export default function PricesPage() {
               </div>
               <div className="shrink-0 text-right">
                 <div className="text-sm font-black">{formatINR(d.unit_price_paise)}</div>
-                <button type="button" onClick={() => setEditing(editing === d.id ? null : d.id)} className="text-xs font-semibold text-orange-700">
-                  {editing === d.id ? 'Cancel' : 'Update price'}
-                </button>
+                <div className="mt-1 flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowHistory(showHistory === d.id ? null : d.id)}
+                    className="text-xs font-semibold text-slate-600 hover:text-slate-900"
+                  >
+                    {showHistory === d.id ? 'Hide' : 'History'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditing(editing === d.id ? null : d.id)}
+                    className="text-xs font-semibold text-orange-700"
+                  >
+                    {editing === d.id ? 'Cancel' : 'Update'}
+                  </button>
+                </div>
               </div>
             </div>
+            {showHistory === d.id && (
+              <PriceHistory listingId={d.id} onTargetUpdated={() => setReload((n) => n + 1)} />
+            )}
             {editing === d.id && (
               <PriceForm
                 deal={d}
@@ -102,7 +120,7 @@ export default function PricesPage() {
 
 function PriceForm({ deal, onSaved, onError }: { deal: Deal; onSaved: () => void; onError: (e: string | null) => void }) {
   const [listed, setListed] = useState('')
-  const [mrp, setMrp] = useState(String(deal.mrp_paise / 100))
+  const [mrp, setMrp] = useState(paiseToRupeesInput(deal.mrp_paise))
   const [member, setMember] = useState('')
   const [inStock, setInStock] = useState(true)
 

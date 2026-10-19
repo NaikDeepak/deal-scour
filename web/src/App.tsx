@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import SignIn from './features/auth/SignIn'
 import BasketsPage from './features/baskets/BasketsPage'
+import DealsPage from './features/deals/DealsPage'
 import HouseholdPage from './features/household/HouseholdPage'
 import OffersPage from './features/offers/OffersPage'
 import PlansPage from './features/plans/PlansPage'
@@ -8,8 +9,9 @@ import PricesPage from './features/prices/PricesPage'
 import { auth, setUnauthorizedHandler, type Me } from './lib/api'
 import { usePreference } from './lib/preference'
 
-type Tab = 'plan' | 'baskets' | 'offers' | 'prices' | 'household'
+type Tab = 'deals' | 'plan' | 'baskets' | 'offers' | 'prices' | 'household'
 const TABS: { id: Tab; label: string }[] = [
+  { id: 'deals', label: 'Deals' },
   { id: 'plan', label: 'Plan' },
   { id: 'baskets', label: 'Baskets' },
   { id: 'offers', label: 'Offers' },
@@ -59,6 +61,7 @@ export default function App() {
               </button>
             ))}
           </nav>
+          {tab === 'deals' && <DealsPage />}
           {tab === 'plan' && <PlansPage onAccepted={() => setTab('baskets')} />}
           {tab === 'baskets' && <BasketsPage />}
           {tab === 'offers' && <OffersPage />}
