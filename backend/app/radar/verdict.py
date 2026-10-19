@@ -63,7 +63,10 @@ class VerdictOutcome:
 
 
 def url_slug_words(url: str | None) -> str:
-    """Product words from a resolved URL path, e.g. '/Tata-Sampann-Almonds-500g/dp/B0…' -> 'Tata Sampann Almonds 500g'."""
+    """Product words from a resolved URL path.
+
+    e.g. '/Tata-Sampann-Almonds-500g/dp/B0…' -> 'Tata Sampann Almonds 500g'.
+    """
     if not url:
         return ""
     try:

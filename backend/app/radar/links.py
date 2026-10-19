@@ -50,8 +50,8 @@ class ResolvedLink:
     status: Literal["ok", "unsupported", "rate_limited"]
     ref: ProductRef | None = None
     reason: str = "ok"
-    # Last hop URL before canonicalisation. Its path slug names the product ("/Tata-Sampann-Almonds-500g/dp/…"),
-    # which the relevance gate reads before any page is fetched.
+    # Last hop URL before canonicalisation. Its path slug names the product
+    # (e.g. "/Tata-Sampann-Almonds-500g/dp/…"), which the relevance gate reads before any page is fetched.
     final_url: str | None = None
 
 
