@@ -3,6 +3,7 @@ import { api, PLATFORM_META, type Deal, type Platform } from '../../lib/api'
 import { formatINR, parseRupees } from '../../lib/money'
 import { usePreference } from '../../lib/preference'
 import { useProducts } from '../../lib/products'
+import { isProductPage } from '../../lib/links'
 import { Card, ErrorNote, inputClass, SectionTitle } from '../../lib/ui'
 import AddProduct from './AddProduct'
 import FetcherStatus from './FetcherStatus'
@@ -57,9 +58,17 @@ export default function PricesPage() {
                 <div className="truncate text-sm font-bold">
                   {d.icon} {d.brand} {d.pack_label}
                 </div>
+                <div className="truncate text-xs text-slate-500">{d.title}</div>
                 <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-600">
                   <span className="h-2 w-2 rounded-full" style={{ backgroundColor: PLATFORM_META[d.platform].color }} />
-                  {PLATFORM_META[d.platform].name}
+                  <a
+                    href={d.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-semibold text-slate-800 underline decoration-slate-300 underline-offset-2 hover:decoration-slate-800"
+                  >
+                    {isProductPage(d.url) ? 'Open on' : 'Search on'} {PLATFORM_META[d.platform].name} ↗
+                  </a>
                   <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${FRESHNESS[d.freshness].className}`}>
                     {FRESHNESS[d.freshness].label}
                   </span>
