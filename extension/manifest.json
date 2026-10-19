@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "DealScour Live Price Scourer",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "One-click background price scouring across Amazon, Flipkart, Blinkit, Swiggy Instamart, and Zepto for your DealScour shopping list.",
   "action": {},
   "options_page": "options.html",

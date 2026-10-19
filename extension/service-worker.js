@@ -585,11 +585,18 @@ function handleRuntimeMessage(message, sender, sendResponse) {
                 });
                 const injectionResults = await globalThis.chrome.scripting.executeScript({
                   target: { tabId },
-                  func: () => (typeof extractCandidates === 'function' ? extractCandidates(document) : []),
+                  func: async () => {
+                    if (typeof waitForCandidates === 'function') {
+                      return await waitForCandidates(document);
+                    }
+                    return typeof extractCandidates === 'function' ? extractCandidates(document) : [];
+                  },
                 });
-                const extracted =
-                  injectionResults && injectionResults[0] && Array.isArray(injectionResults[0].result)
-                    ? injectionResults[0].result
+                const rawResult = injectionResults && injectionResults[0] ? injectionResults[0].result : null;
+                const extracted = Array.isArray(rawResult)
+                  ? rawResult
+                  : rawResult && Array.isArray(rawResult.candidates)
+                    ? rawResult.candidates
                     : [];
                 shopCandidates = extracted.slice(0, 5).map((c) => ({
                   platform: target.platform,
@@ -598,6 +605,16 @@ function handleRuntimeMessage(message, sender, sendResponse) {
                   price_paise: c.price_paise ?? null,
                   pack_label: c.pack_label ?? null,
                 }));
+
+                if (shopCandidates.length > 0) {
+                  results.push(...shopCandidates);
+                } else {
+                  results.push({
+                    platform: target.platform,
+                    status: 'no_links',
+                    search_url: target.url,
+                  });
+                }
               }
             }
           } catch {
@@ -612,7 +629,6 @@ function handleRuntimeMessage(message, sender, sendResponse) {
             }
           }
 
-          results.push(...shopCandidates);
 
           if (sender.tab && sender.tab.id) {
             try {

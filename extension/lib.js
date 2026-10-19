@@ -280,6 +280,82 @@ function isAllowedSearchUrl(rawUrl, platform) {
   }
 }
 
+function parsePackLabel(rawText) {
+  if (!rawText || typeof rawText !== 'string') return null;
+  const s = rawText.trim();
+  if (!s) return null;
+
+  const UNIT_RE = '(?:g|gm|gms|gram|grams|kg|kgs|ml|mls|l|ltr|ltrs|litre|litres)';
+
+  function formatResult(val, unitRaw, multiplier = 1) {
+    const u = unitRaw.toLowerCase();
+    const total = val * multiplier;
+    if (!Number.isFinite(total) || total <= 0) return null;
+
+    if (u === 'kg' || u === 'kgs') {
+      return `${total}kg`;
+    }
+    if (u === 'l' || u === 'ltr' || u === 'ltrs' || u === 'litre' || u === 'litres') {
+      return `${total}l`;
+    }
+    if (u === 'ml' || u === 'mls') {
+      return `${total}ml`;
+    }
+    return `${total}g`;
+  }
+
+  // 1. Prefix multiplier with "Pack of N x Q" or "N x Q": e.g. "Pack of 3 x 200g", "3 x 200g"
+  const prefixMult = s.match(
+    new RegExp(`(?:pack\\s+of\\s+)?(\\d+)\\s*[xX*]\\s*(\\d+(?:\\.\\d+)?)\\s*(${UNIT_RE})\\b`, 'i')
+  );
+  if (prefixMult) {
+    const mult = parseInt(prefixMult[1], 10);
+    const val = parseFloat(prefixMult[2]);
+    const unit = prefixMult[3];
+    return formatResult(val, unit, mult);
+  }
+
+  // 2. Suffix multiplier with "(Pack of N)" or "Pack of N" or "[Pack of N]": e.g. "200 Gram (Pack Of 2)"
+  const suffixPackOf = s.match(
+    new RegExp(
+      `(\\d+(?:\\.\\d+)?)\\s*(${UNIT_RE})\\b[^(]*[\\(\\[]?\\s*pack\\s+of\\s+(\\d+)\\s*[\\)\\]]?`,
+      'i'
+    )
+  );
+  if (suffixPackOf) {
+    const val = parseFloat(suffixPackOf[1]);
+    const unit = suffixPackOf[2];
+    const mult = parseInt(suffixPackOf[3], 10);
+    return formatResult(val, unit, mult);
+  }
+
+  // 3. Suffix multiplier "Q x N": e.g. "200g x 3"
+  const suffixMult = s.match(
+    new RegExp(`(\\d+(?:\\.\\d+)?)\\s*(${UNIT_RE})\\b\\s*[xX*]\\s*(\\d+)\\b`, 'i')
+  );
+  if (suffixMult) {
+    const val = parseFloat(suffixMult[1]);
+    const unit = suffixMult[2];
+    const mult = parseInt(suffixMult[3], 10);
+    return formatResult(val, unit, mult);
+  }
+
+  // 4. "Pack of N" with no quantity -> ambiguous / null
+  if (/^\s*(?:\(?\s*pack\s+of\s+\d+\s*\)?)\s*$/i.test(s)) {
+    return null;
+  }
+
+  // 5. Standard single quantity match: e.g. "1 Kg", "500gm"
+  const matches = [...s.matchAll(new RegExp(`\\b(\\d+(?:\\.\\d+)?)\\s*(${UNIT_RE})\\b`, 'gi'))];
+  if (matches.length === 1) {
+    const val = parseFloat(matches[0][1]);
+    const unit = matches[0][2];
+    return formatResult(val, unit, 1);
+  }
+
+  return null;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     PORTAL_ORIGINS,
@@ -293,6 +369,7 @@ if (typeof module !== 'undefined' && module.exports) {
     pickAddButton,
     extractProductId,
     isMatchingProductPage,
+    parsePackLabel,
   };
 }
 

@@ -3,7 +3,12 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type { CatalogProductItem, SavedNeed } from '../../lib/api'
 import PlansPage from '../plans/PlansPage'
-import { CatalogResultsSection, catalogProductToNeed, searchCatalogItems } from './CatalogPicker'
+import {
+  CatalogNeedFindButton,
+  CatalogResultsSection,
+  catalogProductToNeed,
+  searchCatalogItems,
+} from './CatalogPicker'
 
 const SAMPLE_CATALOG: CatalogProductItem[] = [
   {
@@ -119,6 +124,41 @@ describe('CatalogPicker', () => {
     // Both the catalog result and the catalog open need render a "Find on shops" button
     const findButtons = html.match(/Find on shops/g) ?? []
     expect(findButtons.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('renders Find on shops for a need that is not in the catalog', () => {
+    const need: SavedNeed = {
+      id: 201,
+      list_id: 1,
+      line_id: 'Sunflower Seeds 500g',
+      product_key: null,
+      family_key: 'sunflower_seeds',
+      quantity: '500g',
+      qty: 1,
+      need_by_minutes: null,
+      lock_platform: null,
+      status: 'open',
+    }
+
+    const html = renderToStaticMarkup(
+      createElement(PlansPage, {
+        onAccepted: () => {},
+        initialCatalogQuery: '',
+        initialCatalogItems: [],
+        initialOpenNeeds: [need],
+      }),
+    )
+
+    expect(html).toContain('Sunflower Seeds 500g')
+    expect(html).toContain('Find on shops')
+
+    const buttonHtml = renderToStaticMarkup(
+      createElement(CatalogNeedFindButton, {
+        need: { ...need, family_key: null },
+        onFindOnShops: () => {},
+      }),
+    )
+    expect(buttonHtml).toContain('Find on shops')
   })
 })
 

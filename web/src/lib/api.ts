@@ -471,6 +471,14 @@ export interface RawCandidateIn {
   title: string
   price_paise: number | null
   pack_label: string | null
+  status?: string
+  search_url?: string
+}
+
+export interface NoLinkShop {
+  platform: Platform
+  status: string
+  search_url: string
 }
 
 export interface CatalogCandidate {
@@ -478,6 +486,7 @@ export interface CatalogCandidate {
   sku: string
   url: string
   title: string
+  brand?: string
   price_paise: number | null
   pack_label: string | null
   pack_matches: boolean
@@ -494,8 +503,17 @@ export const catalog = {
   search: (q: string, limit = 8) =>
     call<CatalogProductItem[]>(`/api/v1/catalog?q=${encodeURIComponent(q)}&limit=${limit}`),
   searchUrls: (id: number) => call<CatalogSearchUrl[]>(`/api/v1/catalog/${id}/search-urls`),
+  searchUrlsFreeText: (q: string) =>
+    call<CatalogSearchUrl[]>(`/api/v1/catalog/search-urls?q=${encodeURIComponent(q)}`),
   scoreCandidates: (id: number, results: RawCandidateIn[]) =>
     call<CatalogCandidate[]>(`/api/v1/catalog/${id}/candidates`, json({ results })),
+  scoreCandidatesFreeText: (q: string, pack: string | null, results: RawCandidateIn[]) => {
+    const packParam = pack ? `&pack=${encodeURIComponent(pack)}` : ''
+    return call<CatalogCandidate[]>(
+      `/api/v1/catalog/candidates?q=${encodeURIComponent(q)}${packParam}`,
+      json({ results }),
+    )
+  },
   refreshPrices: () => call<{ queued: number }>('/api/v1/sources/refresh', { method: 'POST' }),
   sourceStatus: () => call<{ platforms: SourceStatus[]; quick_commerce: string }>('/api/v1/sources/status'),
   autofill: (url: string) => call<AutofillSuggestion>('/api/v1/listings/autofill', json({ url })),

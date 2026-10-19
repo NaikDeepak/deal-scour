@@ -8,17 +8,8 @@ const _lib =
         parseRupeesToPaise: typeof parseRupeesToPaise === 'function' ? parseRupeesToPaise : () => null,
         isProductPageUrl: typeof isProductPageUrl === 'function' ? isProductPageUrl : () => false,
         extractProductId: typeof extractProductId === 'function' ? extractProductId : () => null,
+        parsePackLabel: typeof parsePackLabel === 'function' ? parsePackLabel : () => null,
       };
-
-const PACK_REGEX = /\b(\d+(?:\.\d+)?)\s?(g|kg|ml|l)\b/i;
-
-function normalizePack(rawMatch) {
-  if (!rawMatch) return null;
-  const num = rawMatch[1];
-  const unitRaw = rawMatch[2].toLowerCase();
-  const unit = unitRaw === 'l' ? 'L' : unitRaw;
-  return `${num}${unit}`;
-}
 
 function parseAttributes(attrStr) {
   const attrs = {};
@@ -257,8 +248,7 @@ function extractCandidates(rootInput) {
     if (!title) continue;
 
     const price_paise = extractPriceFromCard(cardText);
-    const packMatch = title.match(PACK_REGEX) || cardText.match(PACK_REGEX);
-    const pack_label = normalizePack(packMatch);
+    const pack_label = _lib.parsePackLabel(title) || _lib.parsePackLabel(cardText);
 
     candidates.push({
       url: entry.url,
@@ -271,10 +261,81 @@ function extractCandidates(rootInput) {
   return candidates;
 }
 
+function hasProductLinks(rootInput) {
+  let root = rootInput;
+  if (typeof root === 'string') {
+    root = parseHtmlToDom(root);
+  } else if (!root && typeof document !== 'undefined') {
+    root = document;
+  }
+  if (!root || typeof root.querySelectorAll !== 'function') {
+    return false;
+  }
+
+  const baseUrl =
+    root.baseURI ||
+    (typeof window !== 'undefined' && window.location ? window.location.href : 'https://www.amazon.in');
+  const anchors = Array.from(root.querySelectorAll('a[href]'));
+
+  for (const a of anchors) {
+    const rawHref = a.href || (typeof a.getAttribute === 'function' ? a.getAttribute('href') : '');
+    if (!rawHref) continue;
+    let resolvedUrl;
+    try {
+      resolvedUrl = new URL(rawHref, baseUrl).href;
+    } catch {
+      continue;
+    }
+    if (_lib.isProductPageUrl(resolvedUrl)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function waitForCandidates(rootInput, { timeoutMs = 8000, pollIntervalMs = 500 } = {}) {
+  const getRoot = () => {
+    if (typeof rootInput === 'function') return rootInput();
+    if (typeof rootInput === 'string') return parseHtmlToDom(rootInput);
+    if (rootInput) return rootInput;
+    if (typeof document !== 'undefined') return document;
+    return null;
+  };
+
+  const startTime = Date.now();
+  while (true) {
+    const root = getRoot();
+    if (root && hasProductLinks(root)) {
+      const candidates = extractCandidates(root);
+      if (candidates.length > 0) {
+        return { status: 'found', candidates };
+      }
+    }
+    const elapsed = Date.now() - startTime;
+    if (elapsed + pollIntervalMs > timeoutMs) {
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+  }
+
+  const finalRoot = getRoot();
+  if (finalRoot && hasProductLinks(finalRoot)) {
+    const candidates = extractCandidates(finalRoot);
+    if (candidates.length > 0) {
+      return { status: 'found', candidates };
+    }
+  }
+
+  return { status: 'no_links', candidates: [] };
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     extractCandidates,
+    hasProductLinks,
+    waitForCandidates,
     parseHtmlToDom,
     stripTags,
+    parsePackLabel: _lib.parsePackLabel,
   };
 }

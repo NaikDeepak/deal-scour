@@ -2,7 +2,7 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { extractCandidates, parseHtmlToDom } = require('../finder.js');
+const { extractCandidates, parseHtmlToDom, waitForCandidates, parsePackLabel } = require('../finder.js');
 
 const FIXTURES_DIR = path.join(__dirname, 'fixtures');
 
@@ -274,6 +274,118 @@ describe('Case 18: Worker timeout skip and single-find concurrency guard', () =>
 
     assert.deepEqual(secondResponse, { ok: false, error: 'A search is already running.' });
     await firstPromise;
+  });
+});
+
+describe('Case 2 (Spec): Pack parsing rules', () => {
+  it('parses "200 Gram (Pack Of 2)" -> 400g', () => {
+    assert.equal(parsePackLabel('200 Gram (Pack Of 2)'), '400g');
+  });
+
+  it('parses "Pack of 3 x 200g" -> 600g', () => {
+    assert.equal(parsePackLabel('Pack of 3 x 200g'), '600g');
+  });
+
+  it('parses "1 Kg" -> 1kg', () => {
+    assert.equal(parsePackLabel('1 Kg'), '1kg');
+  });
+
+  it('parses "Premium Walnuts" -> null', () => {
+    assert.equal(parsePackLabel('Premium Walnuts'), null);
+  });
+
+  it('parses "500gm" -> 500g', () => {
+    assert.equal(parsePackLabel('500gm'), '500g');
+  });
+});
+
+describe('Case 1 (Spec): waitForCandidates with polling and timeout', () => {
+  it('fake DOM that gets product links 1.5s after "complete" -> found', async () => {
+    const startTime = Date.now();
+    let hasLinks = false;
+    setTimeout(() => {
+      hasLinks = true;
+    }, 1500);
+
+    const fakeDom = {
+      baseURI: 'https://www.zepto.com/search?query=walnuts',
+      querySelectorAll(sel) {
+        if (sel === 'a[href]' && hasLinks) {
+          return [
+            {
+              tagName: 'A',
+              href: 'https://www.zepto.com/pvid/walnuts-200g-12345',
+              textContent: 'Happilo Walnuts 200g',
+              parentElement: {
+                textContent: 'Happilo Walnuts 200g ₹299',
+                querySelectorAll: () => [],
+                parentElement: null,
+              },
+            },
+          ];
+        }
+        return [];
+      },
+    };
+
+    const res = await waitForCandidates(fakeDom, { timeoutMs: 4000, pollIntervalMs: 250 });
+    assert.equal(res.status, 'found');
+    assert.equal(res.candidates.length, 1);
+    assert.equal(res.candidates[0].pack_label, '200g');
+    assert.ok(Date.now() - startTime >= 1400);
+  });
+
+  it('fake DOM with no product links after 8s -> no_links', async () => {
+    const emptyDom = {
+      baseURI: 'https://blinkit.com/s/?q=walnuts',
+      querySelectorAll() {
+        return [];
+      },
+    };
+
+    // Use small timeout for test speed, verify status is 'no_links'
+    const res = await waitForCandidates(emptyDom, { timeoutMs: 100, pollIntervalMs: 25 });
+    assert.equal(res.status, 'no_links');
+    assert.deepEqual(res.candidates, []);
+  });
+});
+
+describe('Case 2 (Spec): Worker returns no_links for 0 candidate shops', () => {
+  it('returns {platform, status: "no_links", search_url} when shop has 0 candidates', async () => {
+    const fakeChrome = createFakeChrome({ completeTabs: true });
+    // Override executeScript to return empty candidates / no_links
+    fakeChrome.scripting.executeScript = async (opts) => {
+      fakeChrome._executedScripts.push(opts);
+      if (opts.func) {
+        return [{ result: { status: 'no_links', candidates: [] } }];
+      }
+      return [];
+    };
+    globalThis.chrome = fakeChrome;
+    const { handleRuntimeMessage, resetWorkerStateForTests } = require('../service-worker.js');
+    resetWorkerStateForTests();
+
+    const response = await new Promise((resolve) => {
+      handleRuntimeMessage(
+        {
+          type: 'DEALSCOUR_FIND_PRODUCT',
+          catalogId: 1,
+          delayMs: 0,
+          timeoutMs: 100,
+          targets: [{ platform: 'blinkit', url: 'https://blinkit.com/s/?q=walnuts' }],
+        },
+        { id: 'dealscour-ext-id', tab: { id: 1, url: 'http://localhost:5173/' } },
+        resolve
+      );
+    });
+
+    assert.equal(response.ok, true);
+    assert.equal(response.results.length, 1);
+    assert.deepEqual(response.results[0], {
+      platform: 'blinkit',
+      status: 'no_links',
+      search_url: 'https://blinkit.com/s/?q=walnuts',
+    });
   });
 });
 
