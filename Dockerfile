@@ -7,6 +7,8 @@ RUN corepack enable
 COPY web/package.json web/pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY web/ ./
+# The header badge reads the expected extension version from the manifest at build time.
+COPY extension/manifest.json /extension/manifest.json
 RUN pnpm build
 
 FROM python:3.11-slim AS app
