@@ -337,6 +337,7 @@ def test_case_6_free_text_search_urls_and_candidates(catalog_client: TestClient)
 
 def test_case_5_migration_0010_catalog_categories(engine: Engine) -> None:
     import importlib
+
     mig_mod = importlib.import_module("migrations.versions.0010_catalog_categories")
     mig_0010_upgrade = mig_mod.upgrade
 
@@ -383,3 +384,45 @@ def test_case_5_migration_0010_catalog_categories(engine: Engine) -> None:
         assert listing is not None
         assert listing.category == "dryfruits"
         assert listing.title == "Old Cashews"
+
+
+def test_candidate_pack_the_server_cannot_parse_is_sent_as_unknown(
+    catalog_client: TestClient, engine: Engine
+) -> None:
+    with Session(engine) as s:
+        cat = CatalogProduct(
+            household_id=1,
+            seed_product_id="WALNUT-2",
+            name="California Walnuts",
+            brand="Happilo",
+            category="dryfruits",
+            family_key="walnuts",
+            pack_label="500g",
+            target_pack_weight_g=500,
+        )
+        s.add(cat)
+        s.commit()
+        s.refresh(cat)
+        cat_id = cat.id
+
+    payload = {
+        "results": [
+            {
+                "platform": "amazon",
+                "url": "https://www.amazon.in/dp/B000000003",
+                "title": "Walnuts",
+                "pack_label": "0.5g",
+            },
+            {
+                "platform": "amazon",
+                "url": "https://www.amazon.in/dp/B000000004",
+                "title": "Walnuts 200g",
+                "price_paise": 1,
+            },
+        ]
+    }
+    res = catalog_client.post(f"/api/v1/catalog/{cat_id}/candidates", json=payload)
+    assert res.status_code == 200, res.text
+    scored = {c["url"]: c for c in res.json()}
+    assert scored["https://www.amazon.in/dp/B000000003"]["pack_label"] is None
+    assert scored["https://www.amazon.in/dp/B000000004"]["pack_label"] == "200g"

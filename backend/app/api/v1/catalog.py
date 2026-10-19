@@ -237,6 +237,12 @@ def score_free_text_candidates(
 
         raw_pack = item.pack_label
         pack_label = (raw_pack and _extract_pack_label(raw_pack)) or _extract_pack_label(title_clean)
+        if pack_label is not None:
+            # Only send a pack the server can parse; anything else is unknown, so the owner types it.
+            try:
+                parse_pack(pack_label)
+            except ValueError:
+                pack_label = None
         pack_matches = _check_pack_matches(pack_label, target_weight_g) if target_weight_g > 0 else False
 
         catalog_brand_hint = query_brand if query_brand != "Generic" else None
@@ -305,6 +311,12 @@ def score_catalog_candidates(
 
         raw_pack = item.pack_label
         pack_label = (raw_pack and _extract_pack_label(raw_pack)) or _extract_pack_label(title_clean)
+        if pack_label is not None:
+            # Only send a pack the server can parse; anything else is unknown, so the owner types it.
+            try:
+                parse_pack(pack_label)
+            except ValueError:
+                pack_label = None
         pack_matches = _check_pack_matches(pack_label, row.target_pack_weight_g)
 
         candidate_brand = _resolve_candidate_brand(title_clean, row.brand)

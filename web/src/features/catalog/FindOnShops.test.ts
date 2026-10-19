@@ -2,7 +2,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import type { CatalogCandidate, CatalogProductItem, CatalogSearchUrl } from '../../lib/api'
-import FindOnShops, { groupCandidatesByPlatform, trackSelectedCandidates } from './FindOnShops'
+import FindOnShops, { groupCandidatesByPlatform, isValidPack, trackSelectedCandidates } from './FindOnShops'
 
 const PRODUCT: CatalogProductItem = {
   id: 1,
@@ -205,5 +205,12 @@ describe('FindOnShops', () => {
         pack_label: '200g',
       }),
     )
+  })
+})
+
+describe('isValidPack', () => {
+  it('accepts packs the server can parse and rejects the rest', () => {
+    for (const ok of ['200g', '200 g', '500gm', '1kg', '0.5kg', '1.5 l', '6 pcs', '750ml']) expect(isValidPack(ok)).toBe(true)
+    for (const bad of ['', '0.5g', '2.5ml', 'g', 'about 200g', '200']) expect(isValidPack(bad)).toBe(false)
   })
 })

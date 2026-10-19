@@ -38,6 +38,8 @@ _REMAP_GROUPS: list[tuple[str, list[str]]] = [
             "dal_pulses",
             "rice_grains_flours",
             "spices_masalas",
+            "spices",
+            "masalas",
             "cooking_essentials",
             "packaged_ready_mixes",
             "dal & pulses",

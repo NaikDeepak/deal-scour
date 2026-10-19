@@ -69,8 +69,10 @@ export function categoryToSlug(category: string): string {
 export function isValidPack(val: string): boolean {
   const trimmed = val.trim()
   if (!trimmed) return false
-  return /^\d+(?:\.\d+)?\s*(?:g|gm|gms|gram|grams|kg|kgs|ml|mls|l|ltr|ltrs|litre|litres|pcs|pieces|pc)$/i.test(
-    trimmed,
+  // Whole numbers for g/ml/pieces; kg and litres may have decimals (0.5kg = 500g), as the server's parse_pack accepts.
+  return (
+    /^\d+\s*(?:g|gm|gms|gram|grams|ml|mls|pcs|pieces|pc)$/i.test(trimmed) ||
+    /^\d+(?:\.\d+)?\s*(?:kg|kgs|l|ltr|ltrs|litre|litres)$/i.test(trimmed)
   )
 }
 
