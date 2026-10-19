@@ -3,7 +3,7 @@
 Reads prices from shop pages in your own browser and can add a ready basket to a shop's cart. See ADR-025.
 
 **Install (Chrome):** `chrome://extensions` → turn on Developer mode → **Load unpacked** → pick this `extension/` folder.
-Then open DealScour at `http://localhost:8000`; the Plans tab shows "Check live prices" once the extension is detected.
+Then open DealScour at `http://localhost:8000`; the Plans tab shows "Check live prices and plan" once the extension is detected.
 
 What it does and doesn't do:
 - Opens only amazon.in, flipkart.com, blinkit.com, swiggy.com (Instamart) and zepto product links, one at a time, at most 15 per run.

@@ -264,8 +264,8 @@ export default function PlansPage({ onAccepted }: { onAccepted: () => void }) {
           const { queued } = await catalog.refreshPrices()
           setScourNote(
             queued > 0
-              ? `Queued ${queued} background check(s). Load the DealScour extension/ folder in Chrome for instant 5-portal live scouring.`
-              : 'Optimized with latest stored prices. Load the DealScour extension/ folder in Chrome for instant 5-portal live scouring.',
+              ? `Queued ${queued} background check(s). Install the DealScour extension to check Blinkit, Zepto and Instamart prices too.`
+              : 'Optimized with latest stored prices. Install the DealScour extension to check Blinkit, Zepto and Instamart prices too.',
           )
         } catch {
           setScourNote('Optimized with latest stored prices.')
@@ -347,7 +347,7 @@ export default function PlansPage({ onAccepted }: { onAccepted: () => void }) {
             onClick={oneClickDryfruitsDealFinder}
             className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-bold text-white shadow-2xs hover:bg-amber-700 disabled:opacity-40"
           >
-            🌰 Find Best Deal: All 8 Dryfruits & Seeds (500g each)
+            Add dry fruits and seeds (8 items, 500g each)
           </button>
         </div>
 
@@ -424,7 +424,7 @@ export default function PlansPage({ onAccepted }: { onAccepted: () => void }) {
           onClick={scourAndPlan}
           className="w-full rounded-xl bg-emerald-700 py-3 text-sm font-bold text-white shadow disabled:opacity-40"
         >
-          {busy ? 'Scouring…' : extReady ? '⚡ Scour 5 Portals & Optimize' : '🔄 Refresh Prices & Optimize'}
+          {busy ? 'Checking prices…' : extReady ? 'Check live prices and plan' : 'Refresh prices and plan'}
         </button>
         <button
           type="button"
