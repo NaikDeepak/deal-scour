@@ -70,6 +70,13 @@ Matching rule: a watch on a **product** matches only that product's listings. A 
 ("almonds 1 kg, any brand") matches products in that category whose pack is within ±20% and whose unit rate is compared.
 No keyword "any word matches" logic (prototype bug, see CODE_ANALYSIS §4).
 
+**Built so far (staples tracker):** a watch is a `listing_watch` row on one listing, with an optional target (`PUT /listings/{id}/watch`).
+`GET /deals/feed` lists watched or custom listings that are in stock with a fresh/ok, non-sample price and at least one reason:
+`below_target`, `low_30d` (≥ 3 observations in 30 days, the price has moved, and it's at the low) or `under_avg` (≥ 15% under the 30-day
+average, integer maths). The web shows it as the **Deals** tab. Adding a product: paste a link → `POST /listings/autofill` reads the
+Amazon/Flipkart page once (10 s apart from any other fetch), fills brand/pack/family by rules and, only if something is still missing,
+one capped Gemini call → the user confirms and saves. Quick-commerce links are never fetched.
+
 ## 3. Optimizer request (system sequence)
 
 ```mermaid

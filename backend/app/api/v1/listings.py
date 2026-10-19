@@ -658,6 +658,7 @@ def put_listing_watch(
             select(CustomListing).where(
                 CustomListing.household_id == household_id,
                 CustomListing.listing_id == id,
+                col(CustomListing.archived).is_(False),
             )
         ).first()
         if cl is None:

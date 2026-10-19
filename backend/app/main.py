@@ -7,7 +7,19 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import IntegrityError
 
-from app.api.v1 import auth, baskets, deals, households, listings, lists, offers, plans, prices, sources
+from app.api.v1 import (
+    auth,
+    baskets,
+    deals,
+    households,
+    listings,
+    lists,
+    offers,
+    plans,
+    prices,
+    sources,
+    watch,
+)
 from app.core.config import get_settings
 from app.core.db import get_engine
 from app.core.security import verify_csrf
@@ -38,6 +50,7 @@ for _router in (
     prices.router,
     listings.router,
     sources.router,
+    watch.router,
 ):
     app.include_router(_router, prefix="/api/v1", dependencies=_csrf)
 

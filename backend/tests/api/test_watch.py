@@ -669,3 +669,27 @@ def test_put_watch_only_real_and_owned_listings(watch_client: TestClient, engine
     res_h2 = watch_client.put("/api/v1/listings/h2_secret_listing/watch", json={"target_paise": 1000})
     assert res_h2.status_code == 404
 
+
+    # An archived custom listing of this household can't be watched either.
+    with Session(engine) as s:
+        s.add(
+            CustomListing(
+                household_id=1,
+                listing_id="h1_archived_listing",
+                platform="amazon",
+                sku="B0000000H1A",
+                url="https://www.amazon.in/dp/B0000000H1A",
+                title="Archived Item",
+                brand="Amul",
+                pack_label="500g",
+                category="dairy",
+                product_key="prod_h1_archived",
+                family_key="butter",
+                archived=True,
+                created_at=FIXED_NOW,
+            )
+        )
+        s.commit()
+
+    res_archived = watch_client.put("/api/v1/listings/h1_archived_listing/watch", json={"target_paise": 1000})
+    assert res_archived.status_code == 404
