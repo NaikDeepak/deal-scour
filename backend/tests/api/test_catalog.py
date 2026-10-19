@@ -1,0 +1,228 @@
+from collections.abc import Generator
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from urllib.parse import urlparse
+
+import pytest
+from fastapi import Depends, FastAPI
+from fastapi.testclient import TestClient
+from sqlalchemy.engine import Engine
+from sqlmodel import Session, select
+
+from app.api.v1.catalog import router as catalog_router
+from app.api.v1.listings import router as listings_router
+from app.core.db import get_session
+from app.core.security import hash_token, verify_csrf
+from app.domain.catalog_import import import_catalog_csv
+from app.domain.models import (
+    AppUser,
+    AuthSession,
+    CatalogProduct,
+    CustomListing,
+    Household,
+    HouseholdMember,
+)
+
+SAMPLE_CSV = Path(__file__).parent.parent / "fixtures" / "catalog_sample.csv"
+
+
+@pytest.fixture
+def catalog_client(engine: Engine) -> Generator[TestClient, None, None]:
+    app = FastAPI()
+    csrf = [Depends(verify_csrf)]
+    app.include_router(catalog_router, prefix="/api/v1", dependencies=csrf)
+    app.include_router(listings_router, prefix="/api/v1", dependencies=csrf)
+
+    def override_get_session() -> Generator[Session, None, None]:
+        with Session(engine) as s:
+            yield s
+
+    app.dependency_overrides[get_session] = override_get_session
+
+    with Session(engine) as s:
+        user = s.exec(select(AppUser).where(AppUser.email == "owner@dealscour.local")).first()
+        if not user:
+            user = AppUser(
+                email="owner@dealscour.local",
+                name="Test Owner",
+                created_at=datetime.now(UTC),
+            )
+            s.add(user)
+            s.commit()
+            s.refresh(user)
+
+        assert user.id is not None
+        mem = s.exec(
+            select(HouseholdMember).where(
+                HouseholdMember.household_id == 1,
+                HouseholdMember.user_id == user.id,
+            )
+        ).first()
+        if not mem:
+            mem = HouseholdMember(household_id=1, user_id=user.id, role="owner")
+            s.add(mem)
+            s.commit()
+
+        token = "test-persistent-session-token-for-tests-32ch"
+        token_h = hash_token(token)
+        auth_sess = s.exec(select(AuthSession).where(AuthSession.token_hash == token_h)).first()
+        if not auth_sess:
+            auth_sess = AuthSession(
+                token_hash=token_h,
+                user_id=user.id,
+                created_at=datetime.now(UTC),
+                expires_at=datetime.now(UTC) + timedelta(days=365),
+                last_seen_at=datetime.now(UTC),
+            )
+            s.add(auth_sess)
+            s.commit()
+
+        # Import sample catalog into household 1
+        import_catalog_csv(s, household_id=1, csv_path=SAMPLE_CSV)
+
+        # Also create household 2 with its own catalog product
+        h2 = s.exec(select(Household).where(Household.id == 2)).first()
+        if not h2:
+            s.add(Household(id=2, name="Other", pincode="400001"))
+            s.commit()
+        s.add(
+            CatalogProduct(
+                household_id=2,
+                seed_product_id="OTHER-001",
+                name="Tata Sampann Secret Toor Dal",
+                brand="Tata Sampann",
+                category="Dal & Pulses",
+                family_key="toor_dal",
+                pack_label="1kg",
+                target_pack_weight_g=1000,
+            )
+        )
+        s.commit()
+
+    with TestClient(app) as c:
+        c.cookies.set("ds_session", token)
+        c.headers["X-DealScour"] = "1"
+        yield c
+
+
+# Case 4: GET /catalog?q=tata toor -> the dal; q=tata rice -> not the dal.
+# Another household's catalog -> never returned.
+def test_case_4_search_catalog_word_match_and_household_isolation(catalog_client: TestClient) -> None:
+    res = catalog_client.get("/api/v1/catalog", params={"q": "tata toor"})
+    assert res.status_code == 200, res.text
+    items = res.json()
+    assert len(items) == 1
+    assert items[0]["seed_product_id"] == "DS-0001"
+    assert items[0]["name"] == "Tata Sampann Toor/Arhar Dal"
+    assert items[0]["family_key"] == "toor_dal"
+    assert items[0]["pack_label"] == "600g"
+
+    res_no = catalog_client.get("/api/v1/catalog", params={"q": "tata rice"})
+    assert res_no.status_code == 200
+    assert res_no.json() == []
+
+    # Ensure household 2's product is never returned even on broad query
+    res_all = catalog_client.get("/api/v1/catalog", params={"q": ""})
+    assert res_all.status_code == 200
+    seed_ids = {item["seed_product_id"] for item in res_all.json()}
+    assert "OTHER-001" not in seed_ids
+    assert seed_ids == {"DS-0001", "DF-0001", "DS-0050"}
+
+
+# Case 5: GET /catalog/{id}/search-urls -> 5 urls, encoded, only the 5 allowed hosts.
+def test_case_5_catalog_search_urls(catalog_client: TestClient) -> None:
+    items = catalog_client.get("/api/v1/catalog", params={"q": "tata toor"}).json()
+    cat_id = items[0]["id"]
+
+    res = catalog_client.get(f"/api/v1/catalog/{cat_id}/search-urls")
+    assert res.status_code == 200, res.text
+    urls = res.json()
+    assert len(urls) == 5
+
+    by_platform = {u["platform"]: u["url"] for u in urls}
+    assert set(by_platform.keys()) == {"amazon", "flipkart", "blinkit", "zepto", "instamart"}
+
+    allowed_hosts = {
+        "amazon": "www.amazon.in",
+        "flipkart": "www.flipkart.com",
+        "blinkit": "blinkit.com",
+        "zepto": "www.zepto.com",
+        "instamart": "www.swiggy.com",
+    }
+    for plat, url_str in by_platform.items():
+        parsed = urlparse(url_str)
+        assert parsed.scheme == "https"
+        assert parsed.hostname == allowed_hosts[plat]
+        assert " " not in url_str  # must be URL-encoded
+        assert "Tata" in url_str or "tata" in url_str.lower()
+        assert "600g" in url_str or "600" in url_str
+
+
+# Case 6: POST /catalog/{id}/candidates: a non-product url is dropped.
+# Brand + pack match ranks first; pack_matches is right at +-10%. Nothing is written to the DB.
+def test_case_6_score_candidates_drops_non_product_and_ranks_and_writes_nothing(
+    catalog_client: TestClient,
+    engine: Engine,
+) -> None:
+    items = catalog_client.get("/api/v1/catalog", params={"q": "tata toor"}).json()
+    cat_id = items[0]["id"]  # target_pack_weight_g = 600 (+-10% is 540g..660g)
+
+    payload = {
+        "results": [
+            # Non-product search URL -> must be dropped
+            {
+                "platform": "amazon",
+                "url": "https://www.amazon.in/s?k=toor+dal",
+                "title": "Tata Sampann Toor Dal 600g",
+                "price_paise": 12000,
+                "pack_label": "600g",
+            },
+            # Weak candidate: no brand, pack outside +-10% (500g is < 540g)
+            {
+                "platform": "flipkart",
+                "url": "https://www.flipkart.com/unbranded-toor-dal/p/itm123456?pid=DAL12345678",
+                "title": "Unbranded Toor Dal Pouch",
+                "price_paise": 9900,
+                "pack_label": "500g",
+            },
+            # Boundary candidate: exact +10% (660g) with brand + name words -> ranks above weak
+            {
+                "platform": "blinkit",
+                "url": "https://blinkit.com/prn/tata-sampann-toor-dal/prid/551910",
+                "title": "Tata Sampann Unpolished Toor Arhar Dal",
+                "price_paise": 13500,
+                "pack_label": "660g",
+            },
+            # Lower -10% boundary (540g) without brand
+            {
+                "platform": "instamart",
+                "url": "https://instamart.in/p/everyday-toor-dal-pouch-T6LJGMXRBD",
+                "title": "Everyday Toor Dal",
+                "price_paise": 11000,
+                "pack_label": "540g",
+            },
+        ]
+    }
+
+    res = catalog_client.post(f"/api/v1/catalog/{cat_id}/candidates", json=payload)
+    assert res.status_code == 200, res.text
+    scored = res.json()
+
+    # Non-product URL was dropped -> 3 candidates remain
+    assert len(scored) == 3
+
+    # Brand + pack match (Blinkit Tata Sampann 660g) ranks first
+    assert scored[0]["platform"] == "blinkit"
+    assert scored[0]["url"] == "https://blinkit.com/prn/tata-sampann-toor-dal/prid/551910"
+    assert scored[0]["pack_matches"] is True
+
+    # Instamart 540g is right at -10% boundary -> pack_matches is True
+    by_plat = {c["platform"]: c for c in scored}
+    assert by_plat["instamart"]["pack_matches"] is True
+    # Flipkart 500g is outside +-10% of 600g -> pack_matches is False
+    assert by_plat["flipkart"]["pack_matches"] is False
+
+    # Nothing written to CustomListing
+    with Session(engine) as s:
+        listings = s.exec(select(CustomListing)).all()
+        assert listings == []

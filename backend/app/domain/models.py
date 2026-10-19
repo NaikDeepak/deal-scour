@@ -311,4 +311,29 @@ class LlmUsage(SQLModel, table=True):
     )
 
 
+class CatalogProduct(SQLModel, table=True):
+    __tablename__ = "catalog_product"
+    __table_args__ = (
+        UniqueConstraint("household_id", "seed_product_id", name="uq_catalog_product_household_seed_id"),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    household_id: int = Field(foreign_key="household.id", index=True)
+    seed_product_id: str = Field(min_length=1, max_length=40, index=True)
+    name: str = Field(min_length=1, max_length=160)
+    brand: str = Field(min_length=1, max_length=80)
+    category: str = Field(min_length=1, max_length=80)
+    family_key: str = Field(min_length=1, max_length=40, index=True)
+    pack_label: str = Field(min_length=1, max_length=20)
+    target_pack_weight_g: int = Field(ge=1)
+    suggestions_json: str = Field(default="[]")
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC)
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC)
+    )
+
+
+
 

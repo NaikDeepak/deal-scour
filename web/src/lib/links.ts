@@ -1,5 +1,13 @@
 // True when a shop URL points at one product, not a search or home page.
-const PRODUCT_PATHS = [/\/dp\/[A-Z0-9]{10}/, /\/gp\/product\/[A-Z0-9]{10}/, /\/p\/itm[a-z0-9]+/i, /\/prid\/\d+/, /\/pvid\/[0-9a-f-]+/i, /\/instamart\/item\/\w+/]
+const PRODUCT_PATHS = [
+  /\/dp\/[A-Z0-9]{10}/,
+  /\/gp\/product\/[A-Z0-9]{10}/,
+  /\/p\/itm[a-z0-9]+/i,
+  /\/prid\/\d+/,
+  /\/pvid\/[0-9a-f-]+/i,
+  /\/instamart\/item\/\w+/,
+  /^\/p\/[a-z0-9-]+-[A-Z0-9]{8,}\/?$/,
+]
 
 export function isProductPage(url: string): boolean {
   try {
@@ -11,3 +19,4 @@ export function isProductPage(url: string): boolean {
     return false
   }
 }
+

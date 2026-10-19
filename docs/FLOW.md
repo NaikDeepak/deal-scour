@@ -77,6 +77,12 @@ average, integer maths). The web shows it as the **Deals** tab. Adding a product
 Amazon/Flipkart page once (10 s apart from any other fetch), fills brand/pack/family by rules and, only if something is still missing,
 one capped Gemini call → the user confirms and saves. Quick-commerce links are never fetched.
 
+**Catalog → Find on shops:** "Add an item…" on the Plan page also searches `catalog_product`. A catalog need shows **Find on shops**: the
+server builds 5 shop search URLs (`GET /catalog/{id}/search-urls`); the extension opens each one in a background tab (only those 5 search
+shapes, only for a request from the DealScour origin, one search at a time, ≥ 3 s apart, 20 s timeout), reads up to 5 product links per shop
+and closes the tab. `POST /catalog/{id}/candidates` drops non-product links and sorts by brand/pack/name words for display only. The owner ticks
+the right ones → normal `POST /listings`. Nothing is tracked without the tick.
+
 ## 3. Optimizer request (system sequence)
 
 ```mermaid

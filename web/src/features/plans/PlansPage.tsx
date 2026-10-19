@@ -4,10 +4,12 @@ import {
   catalog,
   PLATFORM_META,
   PLATFORMS,
+  type CatalogProductItem,
   type Deal,
   type LabelledPlanOut,
   type ListDetail,
   type ListSummary,
+  type NeedIn,
   type OrderOut,
   type Platform,
   type PlanSetOut,
@@ -18,6 +20,8 @@ import { formatINR } from '../../lib/money'
 import { usePreference } from '../../lib/preference'
 import { useProducts, type Product } from '../../lib/products'
 import { Card, ErrorNote, SectionTitle } from '../../lib/ui'
+import FindOnShops from '../catalog/FindOnShops'
+import CatalogPicker, { CatalogNeedFindButton } from '../list/CatalogPicker'
 import {
   buildCartItemsFromOrder,
   processPriceCaptures,
@@ -43,7 +47,17 @@ interface ExtensionScourResult {
   error?: string
 }
 
-export default function PlansPage({ onAccepted }: { onAccepted: () => void }) {
+export default function PlansPage({
+  onAccepted,
+  initialOpenNeeds,
+  initialCatalogQuery,
+  initialCatalogItems,
+}: {
+  onAccepted: () => void
+  initialOpenNeeds?: SavedNeed[]
+  initialCatalogQuery?: string
+  initialCatalogItems?: CatalogProductItem[]
+}) {
   const [members, setMembers] = usePreference<Platform[]>('members', ['amazon', 'instamart', 'flipkart'])
   const [fillers, setFillers] = usePreference<string[]>('fillers', [])
   const [listId, setListId] = usePreference<number | null>('listId', null)
@@ -58,6 +72,8 @@ export default function PlansPage({ onAccepted }: { onAccepted: () => void }) {
   )
   const [scourNote, setScourNote] = useState<string | null>(null)
   const [pendingConfirmations, setPendingConfirmations] = useState<PriceConfirmationItem[]>([])
+  const [catalogByLineId, setCatalogByLineId] = useState<Map<string, CatalogProductItem>>(() => new Map())
+  const [findingProduct, setFindingProduct] = useState<CatalogProductItem | null>(null)
   const { deals, products } = useProducts(members, refreshKey)
   const productByKey = useMemo(() => new Map(products.map((p) => [p.key, p])), [products])
   const dealById = useMemo(() => new Map(deals.map((d) => [d.id, d])), [deals])
@@ -138,7 +154,7 @@ export default function PlansPage({ onAccepted }: { onAccepted: () => void }) {
     void loadList()
   }, [loadList])
 
-  const openNeeds = (list?.needs ?? []).filter((n) => n.status === 'open')
+  const openNeeds = list ? list.needs.filter((n) => n.status === 'open') : (initialOpenNeeds ?? [])
 
   async function run(action: () => Promise<unknown>) {
     setBusy(true)
@@ -159,6 +175,17 @@ export default function PlansPage({ onAccepted }: { onAccepted: () => void }) {
     if (openNeeds.some((n) => n.line_id === lineId)) return
     void run(async () => {
       await api.addNeed(listId, { line_id: lineId, product_key: key, family_key: null, quantity: null, qty: 1, need_by_minutes: null, lock_platform: null })
+      setResult(null)
+      await Promise.all([loadList(), loadLists()])
+    })
+  }
+
+  function addCatalogNeed(needIn: Omit<NeedIn, 'line_id'> & { line_id: string }, item: CatalogProductItem) {
+    setCatalogByLineId((prev) => new Map(prev).set(needIn.line_id, item))
+    if (listId === null) return
+    if (openNeeds.some((n) => n.line_id === needIn.line_id)) return
+    void run(async () => {
+      await api.addNeed(listId, needIn)
       setResult(null)
       await Promise.all([loadList(), loadLists()])
     })
@@ -351,17 +378,41 @@ export default function PlansPage({ onAccepted }: { onAccepted: () => void }) {
           </button>
         </div>
 
-        <ProductPicker products={products} onPick={addNeed} placeholder="Add an item…" />
+        <CatalogPicker
+          products={products}
+          placeholder="Add an item…"
+          extReady={extReady}
+          initialQuery={initialCatalogQuery}
+          initialCatalogItems={initialCatalogItems}
+          onPickProduct={addNeed}
+          onPickCatalogNeed={addCatalogNeed}
+          onFindOnShops={setFindingProduct}
+          onTrackedListings={() => setRefreshKey((k) => k + 1)}
+        />
         {openNeeds.length === 0 ? (
           <p className="mt-3 text-sm text-slate-500">Nothing to buy yet. Click the 1-Click Dryfruits button above or pick items below.</p>
         ) : (
           <ul className="mt-3 divide-y divide-slate-100">
             {openNeeds.map((n) => {
-              const p = productByKey.get(n.product_key ?? '') ?? products.find((x) => x.family === n.family_key && x.pack === n.quantity)
+              const seedProduct =
+                productByKey.get(n.product_key ?? '') ??
+                products.find((x) => `${x.brand} ${x.pack}` === n.line_id)
+              const p =
+                seedProduct ??
+                products.find((x) => x.family === n.family_key && x.pack === n.quantity)
+              const isCatalogNeed =
+                catalogByLineId.has(n.line_id) || (!seedProduct && n.family_key !== null)
               return (
                 <li key={n.id} className="flex flex-wrap items-center gap-2 py-2 text-sm">
                   <span className="text-lg">{p?.icon}</span>
                   <span className="min-w-0 flex-1 truncate font-semibold">{n.line_id}</span>
+                  {isCatalogNeed && (
+                    <CatalogNeedFindButton
+                      need={n}
+                      catalogItem={catalogByLineId.get(n.line_id)}
+                      onFindOnShops={setFindingProduct}
+                    />
+                  )}
                   <label className="flex items-center gap-1 text-xs text-slate-600">
                     <input
                       type="checkbox"
@@ -397,6 +448,15 @@ export default function PlansPage({ onAccepted }: { onAccepted: () => void }) {
           </ul>
         )}
       </Card>
+
+      {findingProduct && (
+        <FindOnShops
+          product={findingProduct}
+          extReady={extReady}
+          onClose={() => setFindingProduct(null)}
+          onTracked={() => setRefreshKey((k) => k + 1)}
+        />
+      )}
 
       <ComparisonMatrix needs={openNeeds} deals={deals} />
 

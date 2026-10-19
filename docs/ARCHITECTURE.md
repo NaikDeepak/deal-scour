@@ -138,6 +138,7 @@ erDiagram
 | `notification` | id, user_id, kind, dedupe_key UNIQUE, payload, channel, sent_at |
 | `job_run` | job, started_at, finished_at, status, stats JSON (lock and audit) |
 | `listing_watch` (built) | id, household_id, listing_id, target_paise?, created_at · UNIQUE(household_id, listing_id). Phase-1 form of `watch`: one listing, optional target |
+| `catalog_product` (built) | id, household_id, seed_product_id, name, brand, category, family_key, pack_label, suggested_url? · UNIQUE(household_id, seed_product_id). A pick list imported from CSV (`python -m app.jobs.import_catalog <csv> --household N`); no prices |
 | `llm_usage` (built) | id, household_id?, provider, model, prompt_tokens, response_tokens, total_tokens, cost_paise, created_at. The monthly LLM cap sums this across all households |
 
 **Current price** is a view: the latest `price_observation` per listing, with `age = now − observed_at`. Freshness bands:

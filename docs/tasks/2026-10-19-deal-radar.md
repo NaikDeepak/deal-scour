@@ -20,7 +20,7 @@ a Telegram message from their own bot.
   `extension/lib.js`, `extension/tests/*.test.js`
 - `backend/app/radar/{__init__,posts,links,verdict}.py` (new), `backend/app/notify/{__init__,base,telegram}.py` (new)
 - `backend/app/api/v1/radar.py` (new), `backend/app/domain/models.py` (`RadarChannel`, `RadarPost`, `RadarAlert`, `RadarKeyword`),
-  `backend/migrations/versions/0008_radar.py` (new), `backend/app/core/config.py` (Telegram bot settings, quiet hours, daily alert cap)
+  `backend/migrations/versions/0009_radar.py` (new), `backend/app/core/config.py` (Telegram bot settings, quiet hours, daily alert cap)
 - `.env.example`, `backend/tests/radar/*`, `backend/tests/api/test_radar.py`, `backend/tests/test_migrations.py`
 - `web/src/features/radar/RadarPage.tsx` (new: channels, keywords, recent verdicts), `web/src/features/deals/DealsPage.tsx` (Telegram section),
   `web/src/App.tsx`, `web/src/lib/api.ts`, matching tests
@@ -73,7 +73,7 @@ a Telegram message from their own bot.
 7. Posts from a channel not on the list → 422/ignored. Another household's channel → ignored.
 8. Extension: `extractChannelPosts(dom-like objects, allowedPeers)` returns only new posts for allowed peers; ignores other chats; strips nothing but
    text/links/ids. Notification click opens the product url only if `isAllowedUrl`.
-9. Migration 0008 upgrades from 0007 with data intact.
+9. Migration 0009 upgrades from 0008 with data intact.
 
 ## Done when
 - [ ] All cases pass; full suites 3× green; mypy, ruff, eslint, tsc, extension tests clean. Commit on `feat/deal-radar` (no push). `handoff` + `release`.

@@ -43,6 +43,7 @@ def test_migrations_create_expected_schema_and_household(tmp_path: Path) -> None
         "source_status",
         "listing_watch",
         "llm_usage",
+        "catalog_product",
     }
     assert user_tables == expected_tables
 
@@ -336,6 +337,50 @@ def test_migration_0007_upgrade_preserves_data(tmp_path: Path) -> None:
     engine2.dispose()
 
 
+def test_migration_0008_upgrade_preserves_data(tmp_path: Path) -> None:
+    db_file = tmp_path / "upgrade_0008_test.db"
+    db_url = f"sqlite:///{db_file.resolve()}"
+
+    alembic_cfg = Config(str(Path(__file__).parent.parent / "alembic.ini"))
+    alembic_cfg.set_main_option("sqlalchemy.url", db_url)
+    alembic_cfg.set_main_option("script_location", str(Path(__file__).parent.parent / "migrations"))
+
+    # 1. Upgrade to 0007_watch
+    command.upgrade(alembic_cfg, "0007_watch")
+
+    engine = create_db_engine(db_file)
+    with Session(engine) as session:
+        shopping_list_table = SQLModel.metadata.tables["shopping_list"]
+        session.exec(
+            sa.insert(shopping_list_table).values(
+                id=1,
+                household_id=1,
+                name="Existing List Pre-0008",
+                kind="monthly",
+                archived=False,
+                created_at=datetime.now(UTC),
+            )
+        )
+        session.commit()
+    engine.dispose()
+
+    # 2. Upgrade to head (0008_catalog)
+    command.upgrade(alembic_cfg, "head")
+
+    # 3. Verify existing data intact and catalog_product table exists
+    engine2 = create_db_engine(db_file)
+    inspector = sa.inspect(engine2)
+    assert "catalog_product" in inspector.get_table_names()
+
+    with Session(engine2) as session:
+        shopping_list_table = SQLModel.metadata.tables["shopping_list"]
+        row = session.exec(sa.select(shopping_list_table).where(shopping_list_table.c.id == 1)).first()
+        assert row is not None
+        assert row.name == "Existing List Pre-0008"
+        assert row.household_id == 1
+    engine2.dispose()
+
+
 def test_sqlite_pragmas(tmp_path: Path) -> None:
     db_file = tmp_path / "pragma_test.db"
     engine = create_db_engine(db_file)
@@ -346,3 +391,4 @@ def test_sqlite_pragmas(tmp_path: Path) -> None:
 
         jm_result = conn.execute(sa.text("PRAGMA journal_mode")).scalar()
         assert str(jm_result).lower() == "wal"
+

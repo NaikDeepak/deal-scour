@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from app.api.v1 import (
     auth,
     baskets,
+    catalog,
     deals,
     households,
     listings,
@@ -51,6 +52,7 @@ for _router in (
     listings.router,
     sources.router,
     watch.router,
+    catalog.router,
 ):
     app.include_router(_router, prefix="/api/v1", dependencies=_csrf)
 
