@@ -97,11 +97,9 @@ export function CatalogNeedFindButton({
         ? need.line_id.slice(0, -(need.quantity.length + 1)).trim()
         : need.line_id
     const results = await catalog.search(queryText, 5)
-    if (results.length > 0) {
-      const exact =
-        results.find((r) => `${r.name} ${r.pack_label}` === need.line_id) ?? results[0]
-      onFindOnShops(exact)
-    }
+    // Only an exact name + pack match; never guess another product.
+    const exact = results.find((r) => `${r.name} ${r.pack_label}` === need.line_id)
+    if (exact) onFindOnShops(exact)
   }
 
   return (

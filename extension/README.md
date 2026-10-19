@@ -11,3 +11,12 @@ What it does and doesn't do:
 - Add to cart starts only after you click **Add N items** in its own window. It never clicks Buy now, Checkout or Pay. You check out.
 
 Tests: `node --test extension/tests/*.test.js`
+
+## Find on shops
+
+From a catalog item on the Plan page, **Find on shops** opens each shop's search page in a background tab, reads up to 5 product links with
+price and pack, and closes the tab. It only accepts requests from DealScour (`localhost:8000` or the dev server on `5173`) and only opens the
+5 shop search pages. It never clicks or types on the shop. You choose which results to track.
+
+If you open DealScour on a different address or port, add it to `PORTAL_ORIGINS` in `lib.js` and `portal-bridge.js`, and to `matches` in
+`manifest.json`, then reload the extension.

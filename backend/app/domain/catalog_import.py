@@ -66,7 +66,7 @@ def import_catalog_csv(
     groups: dict[str, list[dict[str, str]]] = {}
     skipped: list[ImportSkippedItem] = []
 
-    with path.open("r", encoding="utf-8", newline="") as f:
+    with path.open("r", encoding="utf-8-sig", newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
             seed_id = (row.get("seed_product_id") or "").strip()

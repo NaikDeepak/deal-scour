@@ -119,3 +119,12 @@ def test_import_catalog_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     assert report.created == 3
     assert report.updated == 0
     engine.dispose()
+
+
+# The real CSVs are saved with a UTF-8 byte-order mark; the first header must still be read.
+def test_import_csv_with_byte_order_mark(mem_session: Session, tmp_path: Path) -> None:
+    bom_csv = tmp_path / "bom.csv"
+    bom_csv.write_bytes(b"\xef\xbb\xbf" + SAMPLE_CSV.read_bytes().lstrip(b"\xef\xbb\xbf"))
+    report = import_catalog_csv(mem_session, household_id=1, csv_path=bom_csv)
+    assert report.created == 3
+    assert report.skipped == []
