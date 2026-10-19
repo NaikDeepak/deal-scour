@@ -111,6 +111,36 @@ def test_instamart_url_parsing() -> None:
         url="https://www.swiggy.com/instamart/item/ITEM999",
     )
 
+    # New instamart.in product URL format: /p/<slug>-<ID>
+    url3 = (
+        "https://instamart.in/p/"
+        "tata-sampann-pure-cashews-whole-kaju-nutritious-delicious-T6LJGMXRBD"
+    )
+    ref3 = parse_product_url(url3)
+    assert ref3 == ProductRef(
+        platform="instamart",
+        sku="T6LJGMXRBD",
+        url="https://instamart.in/p/tata-sampann-pure-cashews-whole-kaju-nutritious-delicious-T6LJGMXRBD",
+    )
+
+    url4 = (
+        "https://www.instamart.in/p/"
+        "tata-sampann-pure-cashews-whole-kaju-nutritious-delicious-T6LJGMXRBD/?utm_source=share"
+    )
+    ref4 = parse_product_url(url4)
+    assert ref4 == ProductRef(
+        platform="instamart",
+        sku="T6LJGMXRBD",
+        url="https://instamart.in/p/tata-sampann-pure-cashews-whole-kaju-nutritious-delicious-T6LJGMXRBD",
+    )
+
+    # Reject instamart.in search or malformed paths
+    with pytest.raises(ValueError):
+        parse_product_url("https://instamart.in/search?query=cashews")
+    with pytest.raises(ValueError):
+        parse_product_url("https://instamart.in/p/shortid-ABC12")
+
+
 
 @pytest.mark.parametrize(
     "short_url",

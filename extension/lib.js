@@ -8,6 +8,9 @@ const ALLOWED_HOSTS = new Set([
   'www.flipkart.com',
   'blinkit.com',
   'www.swiggy.com',
+  'swiggy.com',
+  'instamart.in',
+  'www.instamart.in',
   'www.zeptonow.com',
   'zeptonow.com',
   'zepto.com',
@@ -87,8 +90,14 @@ function isProductPageUrl(rawUrl) {
   if (!rawUrl || typeof rawUrl !== 'string') return false;
   try {
     const parsed = new URL(rawUrl);
+    if (parsed.protocol !== 'https:') return false;
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
     const path = parsed.pathname;
+    if (path.includes('/sspa/click') || path.includes('/gp/slredirect')) return false;
     if (path.includes('/dp/') || path.includes('/gp/product/')) return true;
+    if (host === 'instamart.in') {
+      return /^\/p\/[a-z0-9-]+-[A-Z0-9]{8,}\/?$/.test(path);
+    }
     if (path.includes('/p/') && (parsed.searchParams.has('pid') || /\/p\/itm/i.test(path))) return true;
     if (path.includes('/prid/')) return true;
     if (path.includes('/pvid/')) return true;
@@ -202,6 +211,12 @@ function extractProductId(rawUrl) {
     // Swiggy Instamart item id: /instamart/item/...
     if (host.includes('swiggy.')) {
       const m = path.match(/\/instamart\/item\/([A-Za-z0-9_-]+)/i);
+      return m ? m[1] : null;
+    }
+
+    // Instamart new domain: instamart.in/p/<slug>-<ID>
+    if (host === 'instamart.in') {
+      const m = path.match(/^\/p\/[a-z0-9-]+-([A-Z0-9]{8,})\/?$/);
       return m ? m[1] : null;
     }
 

@@ -373,5 +373,101 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'DEALSCOUR_FIND_PRODUCT') {
+    (async () => {
+      const allTargets = Array.isArray(message.targets) ? message.targets : [];
+      const targets = allTargets.slice(0, 5);
+      const results = [];
+
+      for (let i = 0; i < targets.length; i += 1) {
+        const target = targets[i];
+        if (!target || !isAllowedUrl(target.url)) {
+          continue;
+        }
+        if (i > 0) {
+          await sleep(3000);
+        }
+
+        if (sender.tab && sender.tab.id) {
+          try {
+            await chrome.tabs.sendMessage(sender.tab.id, {
+              type: 'DEALSCOUR_FIND_PROGRESS',
+              catalogId: message.catalogId,
+              current: i + 1,
+              total: targets.length,
+              platform: target.platform,
+              found: 0,
+              status: 'searching',
+            });
+          } catch {
+            // portal tab may have closed
+          }
+        }
+
+        let tabId = null;
+        let shopCandidates = [];
+        try {
+          const createdTab = await chrome.tabs.create({ url: target.url, active: false });
+          tabId = createdTab.id;
+          if (tabId) {
+            await waitForTabComplete(tabId, 20000);
+            await chrome.scripting.executeScript({
+              target: { tabId },
+              files: ['lib.js', 'finder.js'],
+            });
+            const injectionResults = await chrome.scripting.executeScript({
+              target: { tabId },
+              func: () => (typeof extractCandidates === 'function' ? extractCandidates(document) : []),
+            });
+            const extracted =
+              injectionResults && injectionResults[0] && Array.isArray(injectionResults[0].result)
+                ? injectionResults[0].result
+                : [];
+            shopCandidates = extracted.slice(0, 5).map((c) => ({
+              platform: target.platform,
+              url: c.url,
+              title: c.title,
+              price_paise: c.price_paise ?? null,
+              pack_label: c.pack_label ?? null,
+            }));
+          }
+        } catch {
+          // 20 s timeout or script error skips that shop
+          shopCandidates = [];
+        } finally {
+          if (tabId !== null) {
+            try {
+              await chrome.tabs.remove(tabId);
+            } catch {
+              // tab may already be closed
+            }
+          }
+        }
+
+        results.push(...shopCandidates);
+
+        if (sender.tab && sender.tab.id) {
+          try {
+            await chrome.tabs.sendMessage(sender.tab.id, {
+              type: 'DEALSCOUR_FIND_PROGRESS',
+              catalogId: message.catalogId,
+              current: i + 1,
+              total: targets.length,
+              platform: target.platform,
+              found: shopCandidates.length,
+              status: 'done',
+            });
+          } catch {
+            // ignore
+          }
+        }
+      }
+
+      sendResponse({ results });
+    })();
+    return true;
+  }
+
   return false;
 });
+

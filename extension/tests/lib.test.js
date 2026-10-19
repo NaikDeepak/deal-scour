@@ -4,9 +4,34 @@ const {
   parseRupeesToPaise,
   priceFromJsonLd,
   isAllowedUrl,
+  isProductPageUrl,
+  extractProductId,
   pickAddButton,
   isMatchingProductPage,
 } = require('../lib.js');
+
+describe('Instamart new domain support (instamart.in/p/<slug>-<ID>)', () => {
+  it('isProductPageUrl accepts instamart.in/p/...-ID and rejects instamart.in/search', () => {
+    assert.equal(
+      isProductPageUrl(
+        'https://instamart.in/p/tata-sampann-pure-cashews-whole-kaju-nutritious-delicious-T6LJGMXRBD'
+      ),
+      true
+    );
+    assert.equal(isProductPageUrl('https://instamart.in/search?query=cashews'), false);
+    assert.equal(isProductPageUrl('https://instamart.in/p/no-valid-id-short'), false);
+  });
+
+  it('extractProductId extracts trailing uppercase ID from instamart.in/p/<slug>-<ID>', () => {
+    assert.equal(
+      extractProductId(
+        'https://instamart.in/p/tata-sampann-pure-cashews-whole-kaju-nutritious-delicious-T6LJGMXRBD'
+      ),
+      'T6LJGMXRBD'
+    );
+    assert.equal(extractProductId('https://www.swiggy.com/instamart/item/ABC12345'), 'ABC12345');
+  });
+});
 
 describe('Case 4: parseRupeesToPaise', () => {
   it('parses formatted Indian rupee strings to integer paise', () => {

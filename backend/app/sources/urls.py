@@ -15,6 +15,7 @@ _FLIPKART_HOSTS: set[str] = {"flipkart.com", "www.flipkart.com", "dl.flipkart.co
 _BLINKIT_HOSTS: set[str] = {"blinkit.com"}
 _ZEPTO_HOSTS: set[str] = {"zeptonow.com", "www.zeptonow.com", "zepto.com", "www.zepto.com"}
 _INSTAMART_HOSTS: set[str] = {"swiggy.com", "www.swiggy.com"}
+_INSTAMART_NEW_HOSTS: set[str] = {"instamart.in", "www.instamart.in"}
 
 _RE_SLUG = re.compile(r"^[a-z0-9-]{1,120}$")
 _RE_AMAZON_ASIN = re.compile(r"^[A-Z0-9]{10}$")
@@ -25,6 +26,7 @@ _RE_ZEPTO_PVID = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 )
 _RE_INSTAMART_ID = re.compile(r"^[A-Za-z0-9]{1,32}$")
+_RE_INSTAMART_NEW_ID = re.compile(r"^[A-Z0-9]{8,32}$")
 
 
 @dataclass(frozen=True)
@@ -142,7 +144,7 @@ def parse_product_url(url: str) -> ProductRef:
             url=f"https://www.zeptonow.com/pn/{slug}/pvid/{pvid}",
         )
 
-    # 5. Instamart
+    # 5a. Instamart (Swiggy domain)
     if host in _INSTAMART_HOSTS:
         # Path: /instamart/item/{id} exactly, trailing slash OK
         m = re.match(r"^/instamart/item/([^/?#]+)/?$", path)
@@ -160,4 +162,24 @@ def parse_product_url(url: str) -> ProductRef:
             url=f"https://www.swiggy.com/instamart/item/{item_id}",
         )
 
+    # 5b. Instamart (instamart.in/p/<slug>-<ID>)
+    if host in _INSTAMART_NEW_HOSTS:
+        m = re.match(r"^/p/([a-z0-9-]{1,120})-([A-Z0-9]{8,32})/?$", path)
+        if not m:
+            raise ValueError(
+                f"Could not extract product path '/p/{{slug}}-{{ID}}' from Instamart URL: {url}"
+            )
+        slug, item_id = m.group(1), m.group(2)
+        if not _RE_SLUG.fullmatch(slug):
+            raise ValueError(f"Invalid Instamart slug: '{slug}'")
+        if not _RE_INSTAMART_NEW_ID.fullmatch(item_id):
+            raise ValueError(f"Invalid Instamart item id: '{item_id}'")
+
+        return ProductRef(
+            platform="instamart",
+            sku=item_id,
+            url=f"https://instamart.in/p/{slug}-{item_id}",
+        )
+
     raise ValueError(f"Unsupported host/platform: {host}")
+

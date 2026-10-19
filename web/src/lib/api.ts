@@ -442,10 +442,60 @@ export interface BulkAutofillResponse {
   results: BulkAutofillResultItem[]
 }
 
+export interface CatalogSuggestion {
+  platform: Platform
+  sku: string
+  url: string
+}
+
+export interface CatalogProductItem {
+  id: number
+  seed_product_id: string
+  name: string
+  brand: string
+  category: string
+  family_key: string
+  pack_label: string
+  target_pack_weight_g: number
+  suggestions: CatalogSuggestion[]
+}
+
+export interface CatalogSearchUrl {
+  platform: Platform
+  url: string
+}
+
+export interface RawCandidateIn {
+  platform: Platform
+  url: string
+  title: string
+  price_paise: number | null
+  pack_label: string | null
+}
+
+export interface CatalogCandidate {
+  platform: Platform
+  sku: string
+  url: string
+  title: string
+  price_paise: number | null
+  pack_label: string | null
+  pack_matches: boolean
+  score: number
+  existing_listing_id?: string | null
+}
+
 export const catalog = {
   parseLink: (url: string) => call<ProductRef>('/api/v1/listings/parse', json({ url })),
   addListing: (l: NewListing) => call<{ listing_id: string; product_key: string }>('/api/v1/listings', json(l)),
+  listings: () =>
+    call<Array<{ listing_id: string; url: string; platform: Platform; sku: string }>>('/api/v1/listings'),
   families: () => call<Family[]>('/api/v1/catalog/families'),
+  search: (q: string, limit = 8) =>
+    call<CatalogProductItem[]>(`/api/v1/catalog?q=${encodeURIComponent(q)}&limit=${limit}`),
+  searchUrls: (id: number) => call<CatalogSearchUrl[]>(`/api/v1/catalog/${id}/search-urls`),
+  scoreCandidates: (id: number, results: RawCandidateIn[]) =>
+    call<CatalogCandidate[]>(`/api/v1/catalog/${id}/candidates`, json({ results })),
   refreshPrices: () => call<{ queued: number }>('/api/v1/sources/refresh', { method: 'POST' }),
   sourceStatus: () => call<{ platforms: SourceStatus[]; quick_commerce: string }>('/api/v1/sources/status'),
   autofill: (url: string) => call<AutofillSuggestion>('/api/v1/listings/autofill', json({ url })),
@@ -468,3 +518,4 @@ export const catalog = {
 export const dealsApi = {
   feed: () => call<DealFeedResponse>('/api/v1/deals/feed'),
 }
+
