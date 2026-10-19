@@ -43,6 +43,20 @@ jobs:
       - run: pnpm test
       - run: pnpm build
 
+  extension:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node --test extension/tests/*.test.js
+      - name: Extension version bumped when extension/ changes
+        if: github.event_name == 'pull_request'
+        run: scripts/check-extension-version.sh origin/${{ github.base_ref }}
+
   docker:
     runs-on: ubuntu-latest
     steps:

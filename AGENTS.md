@@ -80,6 +80,12 @@ These come from ADRs. Breaking one needs a new ADR in `docs/DECISIONS.md`.
 - Format paise with one helper (`formatINR(paise)`). Never divide by 100 inline.
 - Mobile-first. Family members will use this on phones in a store aisle.
 
+### Browser extension (`extension/`)
+- **Every change to `extension/` bumps `"version"` in `extension/manifest.json`** (patch for fixes, minor for features). CI fails the PR
+  otherwise (`scripts/check-extension-version.sh`). The owner checks the version in chrome://extensions and the DealScour header badge to
+  confirm they've reloaded the latest build.
+- Tests: `node --test extension/tests/*.test.js`.
+
 ### Tests
 - `backend/tests/optimizer/` holds **golden tests**. Every worked example in `docs/BASKET_OPTIMIZER.md` §6 must exist
   as a test with the exact expected rupee figures. If you change the optimizer, these must still pass, or the doc must be updated
