@@ -101,3 +101,29 @@ Also: support Instamart's new product links, `https://instamart.in/p/<slug>-<ID>
 ## Don'ts
 No new deps. Don't edit `app/main.py` (the lead wires the router). Don't fetch search pages from the server. Don't auto-track a candidate.
 No clicking or typing on shop pages. No inline `python -c`. One command per call, foreground only. Don't touch `data/` (the lead runs the import).
+
+## Round 2 (review by claude + codex) — same branch; files above plus `web/src/features/plans/PlansPage.tsx`
+11. **Wire it in.** `CatalogPicker` and `FindOnShops` are not used anywhere. The "Add an item…" box lives in `PlansPage.tsx` (spec error, sorry):
+    show catalog results there under "From your catalog", and put a **Find on shops** button on each open need that came from the catalog (and on
+    catalog results). Keep the existing add-item behaviour for seed products.
+12. **Search URLs only.** Add `isAllowedSearchUrl(url, platform)` in `lib.js`: https, exact host and path per platform, query param present:
+    - amazon: `www.amazon.in/s?k=`
+    - flipkart: `www.flipkart.com/search?q=`
+    - blinkit: `blinkit.com/s/?q=`
+    - zepto: `www.zepto.com/search?query=`
+    - instamart: `www.swiggy.com/instamart/search?query=`
+    The finder worker opens a target only if it passes for that target's own platform. Product pages and other paths are refused.
+13. **Portal origin allow-list.** `PORTAL_ORIGINS = ['http://localhost:8000', 'http://127.0.0.1:8000', 'http://localhost:5173', 'http://127.0.0.1:5173']`
+    in `lib.js`. Manifest content-script `matches` are narrowed to those 4 origins. `portal-bridge.js` ignores all messages unless
+    `location.origin` is in the list. The worker handles `DEALSCOUR_FIND_PRODUCT` and `DEALSCOUR_RUN_SCOUR` only when
+    `sender.id === chrome.runtime.id` and `new URL(sender.tab.url).origin` is in the list.
+14. **Timeout really skips.** `waitForTabComplete` returns `'complete' | 'timeout'`. On timeout, close the tab and skip extraction for that shop.
+15. **One find at a time.** A second `DEALSCOUR_FIND_PRODUCT` while one is running → `{ok: false, error: 'A search is already running.'}`.
+
+Test cases (write first):
+16. `isAllowedSearchUrl`: accepts the 5 shapes; rejects an amazon `/dp/` url, a flipkart search url sent as platform `amazon`, http, and a lookalike host.
+17. Worker sender check: wrong origin or foreign `sender.id` → ignored; allowed origin → runs (with fake `chrome`).
+18. Timeout → no `executeScript` on that tab and the tab is removed. A second find while running → the error above.
+19. Web: on the Plan page, typing "toor" shows the catalog result; a catalog need shows **Find on shops**.
+
+Full suites 3×, commit on feat/catalog-finder, handoff + release.
