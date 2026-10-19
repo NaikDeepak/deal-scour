@@ -22,6 +22,11 @@ class Settings:
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3.8-flash"
     llm_monthly_cap_paise: int = 10000
+    telegram_bot_token: str = ""
+    telegram_chat_id: str = ""
+    quiet_hours_start: int = 23
+    quiet_hours_end: int = 7
+    daily_alert_cap: int = 10
 
     @property
     def db_url(self) -> str:
@@ -83,6 +88,27 @@ class Settings:
         except ValueError:
             llm_monthly_cap_paise = 10000
 
+        telegram_bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+        telegram_chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+
+        quiet_start_raw = os.environ.get("DEALSCOUR_QUIET_HOURS_START", "23")
+        try:
+            quiet_hours_start = int(quiet_start_raw) % 24
+        except ValueError:
+            quiet_hours_start = 23
+
+        quiet_end_raw = os.environ.get("DEALSCOUR_QUIET_HOURS_END", "7")
+        try:
+            quiet_hours_end = int(quiet_end_raw) % 24
+        except ValueError:
+            quiet_hours_end = 7
+
+        daily_cap_raw = os.environ.get("DEALSCOUR_DAILY_ALERT_CAP", "10")
+        try:
+            daily_alert_cap = max(1, int(daily_cap_raw))
+        except ValueError:
+            daily_alert_cap = 10
+
         static = os.environ.get("DEALSCOUR_STATIC_DIR")
         return cls(
             db_path=db_path_from_env(),
@@ -101,6 +127,11 @@ class Settings:
             gemini_api_key=gemini_api_key,
             gemini_model=gemini_model,
             llm_monthly_cap_paise=llm_monthly_cap_paise,
+            telegram_bot_token=telegram_bot_token,
+            telegram_chat_id=telegram_chat_id,
+            quiet_hours_start=quiet_hours_start,
+            quiet_hours_end=quiet_hours_end,
+            daily_alert_cap=daily_alert_cap,
         )
 
 

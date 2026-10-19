@@ -335,5 +335,107 @@ class CatalogProduct(SQLModel, table=True):
     )
 
 
+class RadarChannel(SQLModel, table=True):
+    __tablename__ = "radar_channel"
+    __table_args__ = (
+        UniqueConstraint("household_id", "peer_id", name="uq_radar_channel_household_peer"),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    household_id: int = Field(foreign_key="household.id", index=True)
+    peer_id: str = Field(min_length=1, max_length=60, index=True)
+    name: str = Field(min_length=1, max_length=120)
+    enabled: bool = Field(default=True)
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC)
+    )
+
+
+class RadarKeyword(SQLModel, table=True):
+    __tablename__ = "radar_keyword"
+    __table_args__ = (
+        UniqueConstraint("household_id", "keyword", name="uq_radar_keyword_household_kw"),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    household_id: int = Field(foreign_key="household.id", index=True)
+    keyword: str = Field(min_length=1, max_length=80)
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC)
+    )
+
+
+class RadarPost(SQLModel, table=True):
+    __tablename__ = "radar_post"
+    __table_args__ = (
+        UniqueConstraint(
+            "household_id",
+            "peer_id",
+            "message_id",
+            name="uq_radar_post_household_peer_msg",
+        ),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    household_id: int = Field(foreign_key="household.id", index=True)
+    peer_id: str = Field(min_length=1, max_length=60, index=True)
+    message_id: str = Field(min_length=1, max_length=80)
+    text: str = Field(max_length=2000)
+    posted_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC)
+    )
+    verdict: str = Field(default="not_relevant", index=True)
+    reasons_json: str = Field(default="[]")
+    platform: str | None = Field(default=None)
+    sku: str | None = Field(default=None)
+    listing_id: str | None = Field(default=None)
+    product_url: str | None = Field(default=None)
+    title: str | None = Field(default=None)
+    pack_label: str | None = Field(default=None)
+    family_key: str | None = Field(default=None)
+    posted_paise: int | None = Field(default=None)
+    live_paise: int | None = Field(default=None)
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        index=True,
+    )
+
+
+class RadarAlert(SQLModel, table=True):
+    __tablename__ = "radar_alert"
+
+    id: int | None = Field(default=None, primary_key=True)
+    household_id: int = Field(foreign_key="household.id", index=True)
+    post_id: int | None = Field(default=None, foreign_key="radar_post.id")
+    product_key: str = Field(index=True)
+    platform: str
+    sku: str
+    title: str
+    url: str
+    price_paise: int
+    reasons_json: str = Field(default="[]")
+    telegram_status: str = Field(default="pending", index=True)
+    scheduled_for: datetime | None = Field(default=None, index=True)
+    sent_at: datetime | None = Field(default=None)
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        index=True,
+    )
+
+
+class RadarExtensionToken(SQLModel, table=True):
+    __tablename__ = "radar_extension_token"
+
+    id: int | None = Field(default=None, primary_key=True)
+    household_id: int = Field(foreign_key="household.id", index=True)
+    token_hash: str = Field(unique=True, index=True)
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC)
+    )
+    last_used_at: datetime | None = Field(default=None)
+    revoked: bool = Field(default=False)
+
+
+
 
 

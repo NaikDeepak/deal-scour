@@ -12,8 +12,9 @@
     return;
   }
 
+  const version = chrome.runtime.getManifest().version;
   document.documentElement.setAttribute('data-dealscour-extension', 'installed');
-  window.postMessage({ type: 'DEALSCOUR_EXTENSION_READY', version: '0.1.0' }, window.location.origin);
+  window.postMessage({ type: 'DEALSCOUR_EXTENSION_READY', version }, window.location.origin);
 
   window.addEventListener('message', async (event) => {
     if (
@@ -27,7 +28,10 @@
     }
 
     if (event.data.type === 'DEALSCOUR_PING_EXTENSION') {
-      window.postMessage({ type: 'DEALSCOUR_EXTENSION_READY', version: '0.1.0' }, window.location.origin);
+      window.postMessage(
+        { type: 'DEALSCOUR_EXTENSION_READY', version: chrome.runtime.getManifest().version },
+        window.location.origin
+      );
       return;
     }
 
@@ -116,6 +120,36 @@
           {
             type: 'DEALSCOUR_FIND_ERROR',
             catalogId,
+            error: err instanceof Error ? err.message : String(err),
+          },
+          window.location.origin
+        );
+      }
+      return;
+    }
+
+    if (event.data.type === 'DEALSCOUR_SET_RADAR_TOKEN') {
+      const token = typeof event.data.token === 'string' ? event.data.token : '';
+      const apiOrigin = typeof event.data.apiOrigin === 'string' ? event.data.apiOrigin : window.location.origin;
+      try {
+        const response = await chrome.runtime.sendMessage({
+          type: 'DEALSCOUR_SET_RADAR_TOKEN',
+          token,
+          apiOrigin,
+        });
+        window.postMessage(
+          {
+            type: 'DEALSCOUR_RADAR_TOKEN_SAVED',
+            ok: Boolean(response && response.ok),
+            error: (response && response.error) || null,
+          },
+          window.location.origin
+        );
+      } catch (err) {
+        window.postMessage(
+          {
+            type: 'DEALSCOUR_RADAR_TOKEN_SAVED',
+            ok: false,
             error: err instanceof Error ? err.message : String(err),
           },
           window.location.origin

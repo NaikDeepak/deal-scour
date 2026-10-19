@@ -8,6 +8,8 @@ const PORTAL_ORIGINS = [
   'http://127.0.0.1:5173',
 ];
 
+const DEALSCOUR_API_ORIGIN = 'http://localhost:8000';
+
 const SEARCH_URL_RULES = {
   amazon: { host: 'www.amazon.in', path: '/s', param: 'k' },
   flipkart: { host: 'www.flipkart.com', path: '/search', param: 'q' },
@@ -281,6 +283,7 @@ function isAllowedSearchUrl(rawUrl, platform) {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     PORTAL_ORIGINS,
+    DEALSCOUR_API_ORIGIN,
     ALLOWED_HOSTS,
     parseRupeesToPaise,
     priceFromJsonLd,
