@@ -144,10 +144,27 @@ async function addSingleItemToCart(item, isLastItem) {
   }
 }
 
+
+function isFromPendingConfirmWindow(message, sender) {
+  if (!pendingCart || message.requestId !== pendingCart.id) return false;
+  const confirmUrl = chrome.runtime.getURL('confirm.html');
+  if (!sender || sender.id !== chrome.runtime.id || !sender.url || !sender.url.startsWith(confirmUrl)) return false;
+  return !sender.tab || sender.tab.windowId === pendingCart.windowId;
+}
+
+async function clearPendingStorage() {
+  try {
+    await chrome.storage.local.remove(['pendingCartItems', 'pendingCartId']);
+  } catch {
+    // ignore
+  }
+}
+
 async function executePendingAddToCart() {
   if (!pendingCart) return;
   const { items, senderTabId, sendResponse } = pendingCart;
   pendingCart = null;
+  void clearPendingStorage();
 
   const results = [];
   for (let i = 0; i < items.length; i += 1) {
@@ -205,6 +222,7 @@ function cancelPendingAddToCart(reason = 'Cancelled by user') {
   if (!pendingCart) return;
   const { items, senderTabId, sendResponse } = pendingCart;
   pendingCart = null;
+  void clearPendingStorage();
 
   const results = items.map((it) => ({
     title: it.title,
@@ -244,17 +262,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
 
-  if (message.type === 'DEALSCOUR_CONFIRMED_ADD_TO_CART') {
-    (async () => {
-      await executePendingAddToCart();
+  if (message.type === 'DEALSCOUR_CONFIRMED_ADD_TO_CART' || message.type === 'DEALSCOUR_CANCELLED_ADD_TO_CART') {
+    // Only the confirm.html window opened for this exact request may answer it.
+    if (!isFromPendingConfirmWindow(message, sender)) {
+      sendResponse({ ok: false, reason: 'This request has expired. Start again from DealScour.' });
+      return true;
+    }
+    if (message.type === 'DEALSCOUR_CANCELLED_ADD_TO_CART') {
+      cancelPendingAddToCart('Cancelled in extension popup');
       sendResponse({ ok: true });
+      return true;
+    }
+    (async () => {
+      sendResponse({ ok: true });
+      await executePendingAddToCart();
     })();
-    return true;
-  }
-
-  if (message.type === 'DEALSCOUR_CANCELLED_ADD_TO_CART') {
-    cancelPendingAddToCart('Cancelled in extension popup');
-    sendResponse({ ok: true });
     return true;
   }
 
@@ -307,11 +329,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // Max 15 items per add-to-cart run
       const allItems = Array.isArray(message.items) ? message.items : [];
       const items = allItems.slice(0, 15);
-      await chrome.storage.local.set({ pendingCartItems: items, lastCartItemCount: items.length });
+      if (pendingCart) {
+        sendResponse({
+          results: items.map((it) => ({
+            title: it.title,
+            platform: it.platform,
+            added: false,
+            reason: 'Another add-to-cart is waiting for you to confirm it',
+          })),
+        });
+        return;
+      }
+      const requestId = crypto.randomUUID();
+      await chrome.storage.local.set({ pendingCartItems: items, pendingCartId: requestId, lastCartItemCount: items.length });
 
       try {
         const win = await chrome.windows.create({
-          url: 'confirm.html',
+          url: `confirm.html?id=${requestId}`,
           type: 'popup',
           width: 420,
           height: 520,
@@ -319,6 +353,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         });
 
         pendingCart = {
+          id: requestId,
           items,
           senderTabId: sender.tab?.id,
           sendResponse,

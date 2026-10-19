@@ -4,10 +4,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   const confirmBtn = document.getElementById('confirmBtn');
   const cancelBtn = document.getElementById('cancelBtn');
 
+  const requestId = new URLSearchParams(window.location.search).get('id') || '';
   let items = [];
   try {
-    const data = await chrome.storage.local.get(['pendingCartItems']);
-    items = Array.isArray(data.pendingCartItems) ? data.pendingCartItems : [];
+    const data = await chrome.storage.local.get(['pendingCartItems', 'pendingCartId']);
+    if (requestId && data.pendingCartId === requestId && Array.isArray(data.pendingCartItems)) {
+      items = data.pendingCartItems;
+    }
   } catch {
     items = [];
   }
@@ -51,10 +54,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     answered = true;
     confirmBtn.disabled = true;
     confirmBtn.textContent = 'Starting…';
+    let res = null;
     try {
-      await chrome.runtime.sendMessage({ type: 'DEALSCOUR_CONFIRMED_ADD_TO_CART' });
+      res = await chrome.runtime.sendMessage({ type: 'DEALSCOUR_CONFIRMED_ADD_TO_CART', requestId });
     } catch {
-      // ignore
+      res = null;
+    }
+    if (!res || !res.ok) {
+      itemList.textContent = (res && res.reason) || 'This request has expired. Start again from DealScour.';
+      confirmBtn.textContent = 'Expired';
+      return;
     }
     window.close();
   });
@@ -63,7 +72,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (answered) return;
     answered = true;
     try {
-      await chrome.runtime.sendMessage({ type: 'DEALSCOUR_CANCELLED_ADD_TO_CART' });
+      await chrome.runtime.sendMessage({ type: 'DEALSCOUR_CANCELLED_ADD_TO_CART', requestId });
     } catch {
       // ignore
     }
