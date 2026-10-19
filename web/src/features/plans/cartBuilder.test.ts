@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Deal, OrderOut } from '../../lib/api'
-import { buildCartItemsFromOrder, categorizeCartResult, fallbackSearchUrl } from './cartBuilder'
+import { buildCartItemsFromOrder, categorizeCartResult, fallbackSearchUrl, processPriceCaptures } from './cartBuilder'
 
 describe('buildCartItemsFromOrder', () => {
   it('extracts cart items with line.url, dealById url, or platform search fallback', () => {
@@ -111,5 +111,31 @@ describe('categorizeCartResult', () => {
     expect(categorizeCartResult({ added: false, reason: 'Not a supported shop link' })).toBe('failed')
     expect(categorizeCartResult({ added: false, reason: 'Failed to open tab' })).toBe('failed')
     expect(categorizeCartResult({ added: false })).toBe('failed')
+  })
+})
+
+describe('Case 19: processPriceCaptures (one 422 among three captures)', () => {
+  it('saves two and lists the 422 capture for confirmation', async () => {
+    const results = [
+      { listing_id: 'l-1', ok: true, listed_paise: 50000 },
+      { listing_id: 'l-2', ok: true, listed_paise: 20000 },
+      { listing_id: 'l-3', ok: true, listed_paise: 48000 },
+    ]
+
+    const captured: string[] = []
+    const mockCaptureFn = async (p: { listing_id?: string | null }) => {
+      if (p.listing_id === 'l-2') {
+        throw new Error('422: Price changed a lot. Check the page and confirm.')
+      }
+      if (p.listing_id) captured.push(p.listing_id)
+      return { ok: true }
+    }
+
+    const batch = await processPriceCaptures(results, mockCaptureFn)
+    expect(batch.savedCount).toBe(2)
+    expect(captured).toEqual(['l-1', 'l-3'])
+    expect(batch.pendingConfirmations).toHaveLength(1)
+    expect(batch.pendingConfirmations[0].listing_id).toBe('l-2')
+    expect(batch.pendingConfirmations[0].new_price_paise).toBe(20000)
   })
 })

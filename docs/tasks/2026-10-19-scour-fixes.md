@@ -70,3 +70,20 @@ plain objects (no jsdom). Money is integer paise everywhere.
 
 ## Don'ts
 No new deps, no proxies, no CAPTCHA handling, no clicking past add-to-cart. No inline `python -c`. One command per call, foreground only.
+
+## Round 2 (review findings: lead + codex)
+Files: same list, plus new `extension/confirm.html` and `extension/confirm.js`.
+14. **Add to cart needs a click inside the extension (P1).** Any script on the portal page can post `DEALSCOUR_ADD_TO_CART_REQUEST`. The service
+    worker must not act on it directly: it stores the (allow-listed, ≤ 15) items, opens its own `confirm.html` in a small popup window
+    (`chrome.windows.create({type:'popup'})`) listing shop, title and packs, and only starts after the user clicks "Add N items" there.
+    "Cancel" or closing the window drops the request. Scour (read-only) needs no confirmation.
+15. **Check the page you landed on, not the link (P2).** `cart-adder.js` uses `window.location.href` after load. Click only if it is a product
+    page **and** its product id (ASIN / pid / prid / pvid / item id) equals the id in `item.url`. Otherwise `added:false, reason:"The shop showed a
+    different page"`. If `lib.js` helpers are missing, fail closed (`added:false`), never default to true.
+16. **No "+" clicking (P2).** Remove the increment loop. For `packs > 1` on non-Amazon shops, add once and return `added:true, packs_added:1,
+    reason:"Set the quantity to N yourself"`. Amazon keeps the quantity dropdown.
+17. **One bad capture must not stop the scour (P2).** In `PlansPage.tsx`, handle each capture separately: a 422 "Price changed a lot" goes into a
+    "Check these prices" list showing old vs new price with "Looks right" (resend with `confirm: true`) and "Skip". Other captures, the refresh
+    and replanning still run.
+Tests: 18. lib test for the product-id match helper (same ASIN true; different ASIN, search page, other host false). 19. cartBuilder/Plans test:
+one 422 among three captures → two saved, one listed for confirmation. Full suites 3× green, then handoff.

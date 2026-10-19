@@ -161,6 +161,75 @@ function pickAddButton(candidates, packLabel) {
   return null;
 }
 
+function normalizeHost(h) {
+  return String(h || '').replace(/^www\./, '').toLowerCase();
+}
+
+function extractProductId(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== 'string') return null;
+  try {
+    const parsed = new URL(rawUrl);
+    const path = parsed.pathname;
+    const host = normalizeHost(parsed.hostname);
+
+    // Amazon ASIN: 10 chars after /dp/ or /gp/product/ or /product/
+    if (host.includes('amazon.')) {
+      const m = path.match(/\/(?:dp|gp\/product|product)\/([A-Za-z0-9]{10})/i);
+      return m ? m[1].toUpperCase() : null;
+    }
+
+    // Flipkart pid: query param ?pid= or /p/itm...
+    if (host.includes('flipkart.')) {
+      if (parsed.searchParams.has('pid')) {
+        return parsed.searchParams.get('pid');
+      }
+      const m = path.match(/\/p\/(itm[A-Za-z0-9]+)/i);
+      return m ? m[1] : null;
+    }
+
+    // Blinkit prid: /prid/...
+    if (host.includes('blinkit.')) {
+      const m = path.match(/\/prid\/([A-Za-z0-9_-]+)/i);
+      return m ? m[1] : null;
+    }
+
+    // Zepto pvid: /pvid/...
+    if (host.includes('zepto')) {
+      const m = path.match(/\/pvid\/([A-Za-z0-9_-]+)/i);
+      return m ? m[1] : null;
+    }
+
+    // Swiggy Instamart item id: /instamart/item/...
+    if (host.includes('swiggy.')) {
+      const m = path.match(/\/instamart\/item\/([A-Za-z0-9_-]+)/i);
+      return m ? m[1] : null;
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function isMatchingProductPage(targetUrl, landedUrl) {
+  if (!targetUrl || !landedUrl) return false;
+  try {
+    const targetParsed = new URL(targetUrl);
+    const landedParsed = new URL(landedUrl);
+    if (normalizeHost(targetParsed.hostname) !== normalizeHost(landedParsed.hostname)) {
+      return false;
+    }
+    const targetId = extractProductId(targetUrl);
+    const landedId = extractProductId(landedUrl);
+    if (!targetId || !landedId) {
+      return false;
+    }
+    return targetId === landedId;
+  } catch {
+    return false;
+  }
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     ALLOWED_HOSTS,
@@ -169,5 +238,7 @@ if (typeof module !== 'undefined' && module.exports) {
     isAllowedUrl,
     isProductPageUrl,
     pickAddButton,
+    extractProductId,
+    isMatchingProductPage,
   };
 }

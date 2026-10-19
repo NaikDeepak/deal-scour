@@ -18,7 +18,13 @@ import { formatINR } from '../../lib/money'
 import { usePreference } from '../../lib/preference'
 import { useProducts, type Product } from '../../lib/products'
 import { Card, ErrorNote, SectionTitle } from '../../lib/ui'
-import { buildCartItemsFromOrder, triggerAddToCart, type CartItemResult } from './cartBuilder'
+import {
+  buildCartItemsFromOrder,
+  processPriceCaptures,
+  triggerAddToCart,
+  type CartItemResult,
+  type PriceConfirmationItem,
+} from './cartBuilder'
 import ComparisonMatrix from './ComparisonMatrix'
 
 const PLAN_LABELS: Record<LabelledPlanOut['label'], { title: string; blurb: string }> = {
@@ -51,9 +57,34 @@ export default function PlansPage({ onAccepted }: { onAccepted: () => void }) {
     () => typeof document !== 'undefined' && document.documentElement.getAttribute('data-dealscour-extension') === 'installed',
   )
   const [scourNote, setScourNote] = useState<string | null>(null)
+  const [pendingConfirmations, setPendingConfirmations] = useState<PriceConfirmationItem[]>([])
   const { deals, products } = useProducts(members, refreshKey)
   const productByKey = useMemo(() => new Map(products.map((p) => [p.key, p])), [products])
   const dealById = useMemo(() => new Map(deals.map((d) => [d.id, d])), [deals])
+
+  async function handleConfirmPrice(item: PriceConfirmationItem) {
+    try {
+      await api.capturePrice({
+        listing_id: item.listing_id,
+        listed_paise: item.new_price_paise,
+        mrp_paise: item.mrp_paise,
+        in_stock: item.in_stock,
+        eta_minutes: item.eta_minutes,
+        confirm: true,
+      })
+      setPendingConfirmations((prev) => prev.filter((p) => p.listing_id !== item.listing_id))
+      setRefreshKey((k) => k + 1)
+      if (listId !== null) {
+        await executePlan(listId)
+      }
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }
+
+  function handleSkipPrice(item: PriceConfirmationItem) {
+    setPendingConfirmations((prev) => prev.filter((p) => p.listing_id !== item.listing_id))
+  }
 
   useEffect(() => {
     function onMessage(e: MessageEvent) {
@@ -211,21 +242,23 @@ export default function PlansPage({ onAccepted }: { onAccepted: () => void }) {
       const { targets } = await api.scourTargets(listId)
       if (extReady && targets.length > 0) {
         const results = await runExtensionScour(targets)
-        let capturedCount = 0
-        for (const r of results) {
-          if (r.ok && r.listed_paise && r.listed_paise > 0) {
-            await api.capturePrice({
-              listing_id: r.listing_id,
-              listed_paise: r.listed_paise,
-              mrp_paise: r.mrp_paise ?? r.listed_paise,
-              in_stock: r.in_stock ?? true,
-              eta_minutes: r.eta_minutes ?? null,
-            })
-            capturedCount += 1
-          }
+        const oldPriceMap = new Map(deals.map((d) => [d.id, d.unit_price_paise]))
+        const batch = await processPriceCaptures(
+          results,
+          (payload) => api.capturePrice(payload),
+          targets,
+          oldPriceMap,
+        )
+        if (batch.pendingConfirmations.length > 0) {
+          setPendingConfirmations((prev) => [...prev, ...batch.pendingConfirmations])
         }
         setRefreshKey((k) => k + 1)
-        setScourNote(`Captured ${capturedCount}/${targets.length} live prices across portals.`)
+        setScourNote(
+          `Captured ${batch.savedCount}/${targets.length} live prices.` +
+            (batch.pendingConfirmations.length > 0
+              ? ` ${batch.pendingConfirmations.length} price change(s) need confirmation below.`
+              : ''),
+        )
       } else {
         try {
           const { queued } = await catalog.refreshPrices()
@@ -404,6 +437,58 @@ export default function PlansPage({ onAccepted }: { onAccepted: () => void }) {
       </div>
 
       {scourNote && <p className="rounded-xl bg-slate-100 px-3 py-2 text-xs text-slate-700">{scourNote}</p>}
+
+      {pendingConfirmations.length > 0 && (
+        <Card>
+          <SectionTitle>Check these prices</SectionTitle>
+          <p className="mt-1 text-xs text-slate-500">
+            These prices changed by more than 60% compared to recent data. Check that the page was read correctly.
+          </p>
+          <div className="mt-3 space-y-2">
+            {pendingConfirmations.map((item) => (
+              <div
+                key={item.listing_id}
+                className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50/50 p-3 text-xs"
+              >
+                <div>
+                  <div className="font-bold text-slate-800">
+                    <span className="capitalize font-semibold text-slate-500 mr-1.5">[{item.platform}]</span>
+                    {item.title}
+                  </div>
+                  <div className="text-slate-600 mt-0.5">
+                    {item.old_price_paise !== null ? (
+                      <>
+                        Was <span className="line-through">{formatINR(item.old_price_paise)}</span> → Now{' '}
+                        <span className="font-bold text-slate-900">{formatINR(item.new_price_paise)}</span>
+                      </>
+                    ) : (
+                      <>
+                        New price: <span className="font-bold text-slate-900">{formatINR(item.new_price_paise)}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <div className="flex gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => void handleConfirmPrice(item)}
+                    className="rounded-lg bg-emerald-700 px-3 py-1.5 font-bold text-white hover:bg-emerald-800"
+                  >
+                    Looks right
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSkipPrice(item)}
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-bold text-slate-600 hover:bg-slate-50"
+                  >
+                    Skip
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       <ErrorNote error={error} />
       {result && (

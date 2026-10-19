@@ -1,11 +1,12 @@
 // DealScour MV3 Background Service Worker
 // Handles:
 // 1. DEALSCOUR_RUN_SCOUR: Sequential background tab price extraction across supported portals
-// 2. DEALSCOUR_RUN_ADD_TO_CART: Sequential auto-add basket items to portal carts
+// 2. DEALSCOUR_RUN_ADD_TO_CART: Requires user click inside confirmation popup (confirm.html) before adding
 
 importScripts('lib.js');
 
 const lastOpenTimeByHost = new Map();
+let pendingCart = null;
 
 async function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -143,9 +144,118 @@ async function addSingleItemToCart(item, isLastItem) {
   }
 }
 
+async function executePendingAddToCart() {
+  if (!pendingCart) return;
+  const { items, senderTabId, sendResponse } = pendingCart;
+  pendingCart = null;
+
+  const results = [];
+  for (let i = 0; i < items.length; i += 1) {
+    const item = items[i];
+    if (senderTabId) {
+      try {
+        await chrome.tabs.sendMessage(senderTabId, {
+          type: 'DEALSCOUR_CART_PROGRESS',
+          current: i + 1,
+          total: items.length,
+          platform: item.platform,
+          title: item.title,
+        });
+      } catch {
+        // ignore
+      }
+    }
+
+    if (!isAllowedUrl(item.url)) {
+      results.push({
+        title: item.title,
+        platform: item.platform,
+        added: false,
+        reason: 'Not a supported shop link',
+      });
+      continue;
+    }
+
+    const isLast = i === items.length - 1;
+    const res = await addSingleItemToCart(item, isLast);
+    results.push(res);
+  }
+
+  if (sendResponse) {
+    try {
+      sendResponse({ results });
+    } catch {
+      // ignore
+    }
+  }
+
+  if (senderTabId) {
+    try {
+      await chrome.tabs.sendMessage(senderTabId, {
+        type: 'DEALSCOUR_ADD_TO_CART_COMPLETE',
+        results,
+      });
+    } catch {
+      // ignore
+    }
+  }
+}
+
+function cancelPendingAddToCart(reason = 'Cancelled by user') {
+  if (!pendingCart) return;
+  const { items, senderTabId, sendResponse } = pendingCart;
+  pendingCart = null;
+
+  const results = items.map((it) => ({
+    title: it.title,
+    platform: it.platform,
+    added: false,
+    reason,
+  }));
+
+  if (sendResponse) {
+    try {
+      sendResponse({ results });
+    } catch {
+      // ignore
+    }
+  }
+
+  if (senderTabId) {
+    try {
+      chrome.tabs.sendMessage(senderTabId, {
+        type: 'DEALSCOUR_ADD_TO_CART_COMPLETE',
+        results,
+      });
+    } catch {
+      // ignore
+    }
+  }
+}
+
+chrome.windows.onRemoved.addListener((windowId) => {
+  if (pendingCart && pendingCart.windowId === windowId) {
+    cancelPendingAddToCart('Confirmation window closed');
+  }
+});
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message.type !== 'string') {
     return false;
+  }
+
+  if (message.type === 'DEALSCOUR_CONFIRMED_ADD_TO_CART') {
+    (async () => {
+      await executePendingAddToCart();
+      sendResponse({ ok: true });
+    })();
+    return true;
+  }
+
+  if (message.type === 'DEALSCOUR_CANCELLED_ADD_TO_CART') {
+    cancelPendingAddToCart('Cancelled in extension popup');
+    sendResponse({ ok: true });
+    return true;
   }
 
   if (message.type === 'DEALSCOUR_RUN_SCOUR') {
@@ -197,42 +307,33 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // Max 15 items per add-to-cart run
       const allItems = Array.isArray(message.items) ? message.items : [];
       const items = allItems.slice(0, 15);
-      const results = [];
-      await chrome.storage.local.set({ lastCartItemCount: items.length });
+      await chrome.storage.local.set({ pendingCartItems: items, lastCartItemCount: items.length });
 
-      for (let i = 0; i < items.length; i += 1) {
-        const item = items[i];
-        if (sender.tab && sender.tab.id) {
-          try {
-            await chrome.tabs.sendMessage(sender.tab.id, {
-              type: 'DEALSCOUR_CART_PROGRESS',
-              current: i + 1,
-              total: items.length,
-              platform: item.platform,
-              title: item.title,
-            });
-          } catch {
-            // ignore
-          }
-        }
+      try {
+        const win = await chrome.windows.create({
+          url: 'confirm.html',
+          type: 'popup',
+          width: 420,
+          height: 520,
+          focused: true,
+        });
 
-        // Refuse unsupported shop links
-        if (!isAllowedUrl(item.url)) {
-          results.push({
-            title: item.title,
-            platform: item.platform,
+        pendingCart = {
+          items,
+          senderTabId: sender.tab?.id,
+          sendResponse,
+          windowId: win.id,
+        };
+      } catch (err) {
+        sendResponse({
+          results: items.map((it) => ({
+            title: it.title,
+            platform: it.platform,
             added: false,
-            reason: 'Not a supported shop link',
-          });
-          continue;
-        }
-
-        const isLast = i === items.length - 1;
-        const res = await addSingleItemToCart(item, isLast);
-        results.push(res);
+            reason: `Failed to open confirmation popup: ${err instanceof Error ? err.message : String(err)}`,
+          })),
+        });
       }
-
-      sendResponse({ results });
     })();
     return true;
   }

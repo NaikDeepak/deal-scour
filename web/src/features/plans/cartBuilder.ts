@@ -156,3 +156,80 @@ export async function triggerAddToCart(
     detail: 'Opened in a new tab',
   }))
 }
+
+export interface PriceConfirmationItem {
+  listing_id: string
+  title: string
+  platform: Platform
+  old_price_paise: number | null
+  new_price_paise: number
+  mrp_paise: number
+  in_stock: boolean
+  eta_minutes: number | null
+}
+
+export interface CaptureBatchResult {
+  savedCount: number
+  pendingConfirmations: PriceConfirmationItem[]
+  errors: { listing_id: string; error: string }[]
+}
+
+export async function processPriceCaptures(
+  results: Array<{
+    listing_id: string
+    ok: boolean
+    listed_paise?: number
+    mrp_paise?: number
+    in_stock?: boolean
+    eta_minutes?: number | null
+  }>,
+  captureFn: (payload: {
+    listing_id: string
+    listed_paise: number
+    mrp_paise?: number | null
+    in_stock?: boolean
+    eta_minutes?: number | null
+    confirm?: boolean
+  }) => Promise<unknown>,
+  targets?: Array<{ listing_id: string; title: string; platform: Platform }>,
+  oldPriceByListingId?: Map<string, number>,
+): Promise<CaptureBatchResult> {
+  const targetMap = new Map((targets || []).map((t) => [t.listing_id, t]))
+  const pendingConfirmations: PriceConfirmationItem[] = []
+  const errors: { listing_id: string; error: string }[] = []
+  let savedCount = 0
+
+  for (const r of results) {
+    if (!r.ok || !r.listed_paise || r.listed_paise <= 0) continue
+    const target = targetMap.get(r.listing_id)
+    const oldPrice = oldPriceByListingId?.get(r.listing_id) ?? null
+    try {
+      await captureFn({
+        listing_id: r.listing_id,
+        listed_paise: r.listed_paise,
+        mrp_paise: r.mrp_paise ?? r.listed_paise,
+        in_stock: r.in_stock ?? true,
+        eta_minutes: r.eta_minutes ?? null,
+      })
+      savedCount += 1
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (msg.includes('Price changed a lot') || msg.includes('422')) {
+        pendingConfirmations.push({
+          listing_id: r.listing_id,
+          title: target?.title ?? r.listing_id,
+          platform: target?.platform ?? 'amazon',
+          old_price_paise: oldPrice,
+          new_price_paise: r.listed_paise,
+          mrp_paise: r.mrp_paise ?? r.listed_paise,
+          in_stock: r.in_stock ?? true,
+          eta_minutes: r.eta_minutes ?? null,
+        })
+      } else {
+        errors.push({ listing_id: r.listing_id, error: msg })
+      }
+    }
+  }
+
+  return { savedCount, pendingConfirmations, errors }
+}

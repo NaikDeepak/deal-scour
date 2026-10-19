@@ -5,6 +5,7 @@ const {
   priceFromJsonLd,
   isAllowedUrl,
   pickAddButton,
+  isMatchingProductPage,
 } = require('../lib.js');
 
 describe('Case 4: parseRupeesToPaise', () => {
@@ -150,5 +151,31 @@ describe('Case 7: pickAddButton', () => {
     assert.equal(pickAddButton([hiddenAdd]), null);
     assert.equal(pickAddButton([]), null);
     assert.equal(pickAddButton(null), null);
+  });
+});
+
+describe('Case 18: isMatchingProductPage (product-id match helper)', () => {
+  it('returns true when both URLs have the same ASIN on Amazon', () => {
+    const targetUrl = 'https://www.amazon.in/dp/B07T6X61N9?tag=dealscour-21';
+    const landedUrl = 'https://www.amazon.in/gp/product/B07T6X61N9';
+    assert.equal(isMatchingProductPage(targetUrl, landedUrl), true);
+  });
+
+  it('returns false when ASINs differ', () => {
+    const targetUrl = 'https://www.amazon.in/dp/B07T6X61N9';
+    const landedUrl = 'https://www.amazon.in/dp/B08XYZ1234';
+    assert.equal(isMatchingProductPage(targetUrl, landedUrl), false);
+  });
+
+  it('returns false when landed page is a search page', () => {
+    const targetUrl = 'https://www.amazon.in/dp/B07T6X61N9';
+    const landedUrl = 'https://www.amazon.in/s?k=cashews';
+    assert.equal(isMatchingProductPage(targetUrl, landedUrl), false);
+  });
+
+  it('returns false when hosts differ', () => {
+    const targetUrl = 'https://www.amazon.in/dp/B07T6X61N9';
+    const landedUrl = 'https://www.flipkart.com/dp/B07T6X61N9';
+    assert.equal(isMatchingProductPage(targetUrl, landedUrl), false);
   });
 });

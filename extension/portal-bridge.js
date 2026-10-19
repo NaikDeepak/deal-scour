@@ -69,7 +69,10 @@
   chrome.runtime.onMessage.addListener((message) => {
     if (
       message &&
-      (message.type === 'DEALSCOUR_SCOUR_PROGRESS' || message.type === 'DEALSCOUR_CART_PROGRESS')
+      (message.type === 'DEALSCOUR_SCOUR_PROGRESS' ||
+        message.type === 'DEALSCOUR_CART_PROGRESS' ||
+        message.type === 'DEALSCOUR_ADD_TO_CART_COMPLETE' ||
+        message.type === 'DEALSCOUR_ADD_TO_CART_ERROR')
     ) {
       window.postMessage(message, window.location.origin);
     }
