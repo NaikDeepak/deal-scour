@@ -118,3 +118,30 @@ Extra test cases:
       0.3.0 available" (amber, with the text "chrome://extensions") when it's older; "Extension not found" (grey) when there's no answer to the
       ping within 1 s.
     - Tests: the bridge test checks the version comes from the manifest; the web test renders the 3 badge states.
+
+## Round 2 (review by claude; codex findings may follow as items 24+) — same branch, same files
+19. **Ingest must be fast; process in the background.**
+    - `POST /radar/posts` only validates, dedupes and stores each post with `status="pending"` (plus the parsed (price, link) pairs). It returns
+      in well under 1 s and does no network calls.
+    - Move the work into `app/radar/process.py` (new): `process_pending_posts(session, now, *, resolver, page_fetcher, notifier,
+      limit=10) -> int`. It handles the oldest pending posts (resolve → verdict → alert) and marks each `done` with its verdict.
+    - The lead wires a lifespan loop in `app/main.py` that calls it plus `send_due_alerts` every 60 s. Leave
+      `# HOOK: radar loop (wired by lead)` in your handoff, not in main.py.
+    - Tests: ingest makes no resolver or page calls (fakes assert 0 calls); `process_pending_posts` processes up to `limit`, oldest first.
+20. **Don't fetch pages for posts that aren't about your products.** Before any page fetch, the relevance gate uses the post text **and** the words
+    in the resolved URL's slug (e.g. `/Tata-Sampann-Almonds-500g/dp/B0…`, Flipkart `/<slug>/p/itm…`). Keep the final hop URL in
+    `ResolvedLink` (`final_url`). No keyword or tracked-family match in either → `not_relevant`, **no fetch**. This applies even when the post
+    text has no product words ("Loot ₹99 : link").
+    - Daily budget for untracked page fetches: `DEALSCOUR_RADAR_MAX_PAGE_FETCHES_PER_DAY` (default 40), counted from stored verdicts. When it's
+      spent, verdict `skipped_budget` with no fetch. Tracked products still verify live (they are few).
+21. **Ignore the backlog.** Posts with `posted_at` older than `DEALSCOUR_RADAR_MAX_POST_AGE_HOURS` (default 6) are stored as `too_old` and never
+    processed. The extension also keeps a per-peer "last sent message_id" in `chrome.storage.local`, so it only sends newer ones after a reload.
+22. **Thread safety:** `LinkResolver` uses a `threading.Lock` around cache and politeness state.
+23. Tests:
+    - "Loot ₹99 : https://amzn.to/x" resolving to `/American-Tourister-Luggage/dp/…` → `not_relevant` with 0 page fetches; resolving to
+      `/Happilo-Almonds-500g/dp/…` with keyword "almonds" → fetch happens.
+    - Budget spent → `skipped_budget`, 0 fetches.
+    - A 7 h old post → `too_old`, 0 resolver calls.
+    - Extension: after a reload with stored last id 120, posts 118–121 → only 121 is sent.
+
+Bump the extension to 0.3.1 if you change `extension/` again after this round (CI checks it). Full suites 3×, commit, handoff + release.
