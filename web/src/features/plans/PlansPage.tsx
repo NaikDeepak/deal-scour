@@ -18,6 +18,7 @@ import { formatINR } from '../../lib/money'
 import { usePreference } from '../../lib/preference'
 import { useProducts, type Product } from '../../lib/products'
 import { Card, ErrorNote, SectionTitle } from '../../lib/ui'
+import { buildCartItemsFromOrder, triggerAddToCart } from './cartBuilder'
 import ComparisonMatrix from './ComparisonMatrix'
 
 const PLAN_LABELS: Record<LabelledPlanOut['label'], { title: string; blurb: string }> = {
@@ -63,6 +64,12 @@ export default function PlansPage({ onAccepted }: { onAccepted: () => void }) {
         const { current, total, platform, title } = e.data as { current: number; total: number; platform: Platform; title: string }
         const pName = PLATFORM_META[platform]?.name ?? platform
         setScourNote(`Scouring ${current}/${total}: ${pName} · ${title}…`)
+      } else if (e.data.type === 'DEALSCOUR_CART_PROGRESS') {
+        const { current, total, platform, title } = e.data as { current: number; total: number; platform: Platform; title: string }
+        const pName = PLATFORM_META[platform]?.name ?? platform
+        setScourNote(`Adding ${current}/${total} to ${pName} cart: ${title}…`)
+      } else if (e.data.type === 'DEALSCOUR_ADD_TO_CART_COMPLETE') {
+        setScourNote('All basket items processed! Check the open portal tab(s) to review your cart and pay.')
       }
     }
     window.addEventListener('message', onMessage)
@@ -153,6 +160,18 @@ export default function PlansPage({ onAccepted }: { onAccepted: () => void }) {
     if (listId === null) return
     void run(async () => {
       await executePlan(listId)
+    })
+  }
+
+  function oneClickDryfruitsDealFinder() {
+    if (listId === null) return
+    void run(async () => {
+      setScourNote('Loading 8 Dryfruits & Seeds (500g each) across all 5 portals + active offers…')
+      await api.applyQuickBundle(listId, 'dryfruits_500g')
+      setRefreshKey((k) => k + 1)
+      await Promise.all([loadList(), loadLists()])
+      await executePlan(listId)
+      setScourNote('Loaded all 8 Dryfruits & Seeds (500g each) and calculated optimal split! Click any basket below to auto-fill your cart.')
     })
   }
 
@@ -282,9 +301,22 @@ export default function PlansPage({ onAccepted }: { onAccepted: () => void }) {
             + New list
           </button>
         </div>
+
+        <div className="mt-2.5 flex flex-wrap items-center gap-2 rounded-xl border border-amber-200 bg-amber-50/70 p-2.5">
+          <span className="text-xs font-bold text-amber-900">Zero-Manual One-Click Preset:</span>
+          <button
+            type="button"
+            disabled={busy || listId === null}
+            onClick={oneClickDryfruitsDealFinder}
+            className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-bold text-white shadow-2xs hover:bg-amber-700 disabled:opacity-40"
+          >
+            🌰 Find Best Deal: All 8 Dryfruits & Seeds (500g each)
+          </button>
+        </div>
+
         <ProductPicker products={products} onPick={addNeed} placeholder="Add an item…" />
         {openNeeds.length === 0 ? (
-          <p className="mt-3 text-sm text-slate-500">Nothing to buy yet. Mark items "no rush" so they can wait for a better basket.</p>
+          <p className="mt-3 text-sm text-slate-500">Nothing to buy yet. Click the 1-Click Dryfruits button above or pick items below.</p>
         ) : (
           <ul className="mt-3 divide-y divide-slate-100">
             {openNeeds.map((n) => {
@@ -370,7 +402,16 @@ export default function PlansPage({ onAccepted }: { onAccepted: () => void }) {
       {scourNote && <p className="rounded-xl bg-slate-100 px-3 py-2 text-xs text-slate-700">{scourNote}</p>}
 
       <ErrorNote error={error} />
-      {result && <Results result={result} dealById={dealById} onAccept={accept} busy={busy} />}
+      {result && (
+        <Results
+          result={result}
+          dealById={dealById}
+          extReady={extReady}
+          onStatus={setScourNote}
+          onAccept={accept}
+          busy={busy}
+        />
+      )}
     </div>
   )
 }
@@ -391,17 +432,27 @@ function ProductPicker({ products, onPick, placeholder }: { products: Product[];
 function Results({
   result,
   dealById,
+  extReady,
+  onStatus,
   onAccept,
   busy,
 }: {
   result: PlanSetOut
   dealById: Map<string, Deal>
+  extReady: boolean
+  onStatus?: (msg: string) => void
   onAccept: (label: string) => void
   busy: boolean
 }) {
   const [active, setActive] = useState(0)
   const plan = result.plans[Math.min(active, result.plans.length - 1)]
   if (!plan) return null
+
+  function addAllOrdersToCarts() {
+    const allItems = plan.orders.flatMap((o) => buildCartItemsFromOrder(o, dealById))
+    triggerAddToCart(allItems, extReady, onStatus)
+  }
+
   return (
     <section className="space-y-3">
       <div className="rounded-2xl border border-emerald-200 bg-emerald-50/80 p-3.5 text-slate-900">
@@ -435,6 +486,13 @@ function Results({
             Delivery/Fees: {plan.total_fees_paise === 0 ? 'Free' : formatINR(plan.total_fees_paise)}
           </span>
         </div>
+        <button
+          type="button"
+          onClick={addAllOrdersToCarts}
+          className="mt-3 w-full rounded-xl bg-emerald-700 py-2.5 text-xs font-extrabold text-white shadow hover:bg-emerald-800"
+        >
+          🛒 One-Click: Auto-Add All {plan.orders.length} Order{plan.orders.length === 1 ? '' : 's'} to Portal Carts
+        </button>
       </div>
 
       <div className="flex gap-2 overflow-x-auto">
@@ -473,7 +531,7 @@ function Results({
       )}
 
       {plan.orders.map((o, i) => (
-        <OrderCard key={i} order={o} dealById={dealById} />
+        <OrderCard key={i} order={o} dealById={dealById} extReady={extReady} onStatus={onStatus} />
       ))}
 
       <button
@@ -494,9 +552,25 @@ function Results({
   )
 }
 
-export function OrderCard({ order, dealById }: { order: OrderOut; dealById?: Map<string, Deal> }) {
+export function OrderCard({
+  order,
+  dealById,
+  extReady = false,
+  onStatus,
+}: {
+  order: OrderOut
+  dealById?: Map<string, Deal>
+  extReady?: boolean
+  onStatus?: (msg: string) => void
+}) {
   const meta = PLATFORM_META[order.platform]
   const pending = order.status === 'pending'
+
+  function handleAddOrderToCart() {
+    const items = buildCartItemsFromOrder(order, dealById)
+    triggerAddToCart(items, extReady, onStatus)
+  }
+
   return (
     <article className={`rounded-2xl border bg-white p-4 shadow-sm ${pending ? 'border-amber-400' : 'border-slate-200'}`}>
       <header className="flex items-center justify-between">
@@ -514,7 +588,7 @@ export function OrderCard({ order, dealById }: { order: OrderOut; dealById?: Map
       )}
       <ul className="mt-2 space-y-1 text-sm">
         {order.lines.map((l) => {
-          const itemUrl = dealById?.get(l.listing_id)?.url
+          const itemUrl = l.url || dealById?.get(l.listing_id)?.url
           return (
             <li key={l.line_id} className="flex justify-between gap-2">
               <span className="min-w-0 truncate">
@@ -552,6 +626,13 @@ export function OrderCard({ order, dealById }: { order: OrderOut; dealById?: Map
           </div>
         ))}
       </dl>
+      <button
+        type="button"
+        onClick={handleAddOrderToCart}
+        className="mt-3 w-full rounded-xl border border-slate-300 bg-slate-50 py-2 text-xs font-bold text-slate-900 hover:bg-slate-100"
+      >
+        🛒 Auto-Add {order.lines.length} Item{order.lines.length === 1 ? '' : 's'} to {meta.name} Cart
+      </button>
     </article>
   )
 }

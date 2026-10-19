@@ -37,11 +37,40 @@
           window.location.origin
         );
       }
+      return;
+    }
+
+    if (event.data.type === 'DEALSCOUR_ADD_TO_CART_REQUEST') {
+      const items = Array.isArray(event.data.items) ? event.data.items : [];
+      try {
+        const response = await chrome.runtime.sendMessage({
+          type: 'DEALSCOUR_RUN_ADD_TO_CART',
+          items,
+        });
+        window.postMessage(
+          {
+            type: 'DEALSCOUR_ADD_TO_CART_COMPLETE',
+            results: (response && response.results) || [],
+          },
+          window.location.origin
+        );
+      } catch (err) {
+        window.postMessage(
+          {
+            type: 'DEALSCOUR_ADD_TO_CART_ERROR',
+            error: err instanceof Error ? err.message : String(err),
+          },
+          window.location.origin
+        );
+      }
     }
   });
 
   chrome.runtime.onMessage.addListener((message) => {
-    if (message && message.type === 'DEALSCOUR_SCOUR_PROGRESS') {
+    if (
+      message &&
+      (message.type === 'DEALSCOUR_SCOUR_PROGRESS' || message.type === 'DEALSCOUR_CART_PROGRESS')
+    ) {
       window.postMessage(message, window.location.origin);
     }
   });

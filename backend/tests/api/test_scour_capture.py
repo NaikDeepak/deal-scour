@@ -161,3 +161,37 @@ def test_list_scour_targets_returns_candidate_listings_for_open_needs(
 
     missing = scour_client.get("/api/v1/lists/99999/scour-targets")
     assert missing.status_code == 404
+
+
+def test_quick_bundle_dryfruits_500g_and_order_line_url(scour_client: TestClient) -> None:
+    list_resp = scour_client.post(
+        "/api/v1/lists",
+        json={"name": "Dryfruits Run", "kind": "monthly"},
+    )
+    assert list_resp.status_code == 201
+    list_id = list_resp.json()["id"]
+
+    bundle_resp = scour_client.post(
+        f"/api/v1/lists/{list_id}/quick-bundle",
+        json={"bundle": "dryfruits_500g"},
+    )
+    assert bundle_resp.status_code == 200, bundle_resp.text
+    bdata = bundle_resp.json()
+    assert bdata["added_needs"] == 8
+
+    plan_resp = scour_client.post(
+        f"/api/v1/lists/{list_id}/plan",
+        json={
+            "members": ["amazon", "flipkart", "blinkit", "instamart", "zepto"],
+            "fillers": [],
+        },
+    )
+    assert plan_resp.status_code == 200, plan_resp.text
+    pdata = plan_resp.json()
+    cheapest = next(p for p in pdata["plans"] if p["label"] == "cheapest_now")
+    assert cheapest["effective_cost_paise"] == 229800
+    assert cheapest["savings_vs_baseline_paise"] == 7500
+    for order in cheapest["orders"]:
+        for line in order["lines"]:
+            assert line["url"].startswith("https://")
+

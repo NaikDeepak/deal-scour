@@ -106,6 +106,7 @@ export interface OrderOut {
     unit_price_paise: number
     line_total_paise: number
     is_filler: boolean
+    url?: string
   }[]
   subtotal_paise: number
   fees: { delivery: number; handling: number; platform: number; small_cart: number; surge: number; total: number }
@@ -276,6 +277,8 @@ export const api = {
   createList: (name: string, kind: ListSummary['kind']) => call<ListSummary>('/api/v1/lists', json({ name, kind })),
   list: (id: number) => call<ListDetail>(`/api/v1/lists/${id}`),
   scourTargets: (listId: number) => call<{ list_id: number; targets: ScourTarget[] }>(`/api/v1/lists/${listId}/scour-targets`),
+  applyQuickBundle: (listId: number, bundle: 'dryfruits_500g' = 'dryfruits_500g') =>
+    call<{ list_id: number; bundle: string; added_needs: number }>(`/api/v1/lists/${listId}/quick-bundle`, json({ bundle })),
   addNeed: (listId: number, need: Omit<NeedIn, 'line_id'> & { line_id: string }) =>
     call<SavedNeed>(`/api/v1/lists/${listId}/needs`, json(need)),
   updateNeed: (id: number, patch: Partial<SavedNeed>) =>

@@ -568,3 +568,45 @@ def get_list_scour_targets(
                 )
 
     return ScourTargetsResponse(list_id=id, targets=targets)
+
+
+class QuickBundleRequest(BaseModel):
+    bundle: Literal["dryfruits_500g"] = "dryfruits_500g"
+
+
+class QuickBundleResponse(BaseModel):
+    list_id: int
+    bundle: str
+    added_needs: int
+
+
+@router.post("/lists/{id}/quick-bundle", response_model=QuickBundleResponse)
+def apply_quick_bundle(
+    id: int,
+    req: QuickBundleRequest,
+    household_id: HouseholdIdDep,
+    session: SessionDep,
+    now_dt: ClockDep,
+) -> QuickBundleResponse:
+    from app.domain.bundles import apply_dryfruits_500g_bundle
+
+    s_list = session.exec(
+        select(ShoppingList).where(
+            ShoppingList.id == id,
+            ShoppingList.household_id == household_id,
+        )
+    ).first()
+    if s_list is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="List not found",
+        )
+
+    added = apply_dryfruits_500g_bundle(
+        session=session,
+        household_id=household_id,
+        list_id=id,
+        now_dt=now_dt,
+    )
+    return QuickBundleResponse(list_id=id, bundle=req.bundle, added_needs=added)
+

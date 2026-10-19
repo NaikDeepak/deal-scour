@@ -4,6 +4,7 @@ import { formatINR, parseRupees } from '../../lib/money'
 import { usePreference } from '../../lib/preference'
 import { useProducts } from '../../lib/products'
 import { Card, ErrorNote, inputClass, SectionTitle } from '../../lib/ui'
+import { buildCartItemsFromBasket, triggerAddToCart } from '../plans/cartBuilder'
 
 const GROUPS: { status: BasketStatus; title: string; hint: string }[] = [
   { status: 'pending', title: 'Pending: waiting for top-up', hint: 'Short of an offer threshold. Add things you need anyway, or place it without the offer.' },
@@ -176,6 +177,18 @@ function BasketCard({
 
         {b.status === 'ready' && (
           <>
+            <button
+              type="button"
+              onClick={() => {
+                const extInstalled =
+                  typeof document !== 'undefined' &&
+                  document.documentElement.getAttribute('data-dealscour-extension') === 'installed'
+                triggerAddToCart(buildCartItemsFromBasket(b, deals), extInstalled)
+              }}
+              className="block w-full rounded-lg bg-emerald-700 py-2 text-center text-xs font-bold text-white hover:bg-emerald-800"
+            >
+              🛒 Auto-Add {b.lines.length} Item{b.lines.length === 1 ? '' : 's'} to {meta.name} Cart
+            </button>
             {storeUrl && (
               <a href={storeUrl} target="_blank" rel="noopener noreferrer" className="block rounded-lg bg-slate-100 py-1.5 text-center text-xs font-bold">
                 Open {meta.name} ↗
