@@ -605,16 +605,6 @@ function handleRuntimeMessage(message, sender, sendResponse) {
                   price_paise: c.price_paise ?? null,
                   pack_label: c.pack_label ?? null,
                 }));
-
-                if (shopCandidates.length > 0) {
-                  results.push(...shopCandidates);
-                } else {
-                  results.push({
-                    platform: target.platform,
-                    status: 'no_links',
-                    search_url: target.url,
-                  });
-                }
               }
             }
           } catch {
@@ -627,6 +617,16 @@ function handleRuntimeMessage(message, sender, sendResponse) {
                 // tab may already be closed
               }
             }
+          }
+
+          if (shopCandidates.length > 0) {
+            results.push(...shopCandidates);
+          } else {
+            results.push({
+              platform: target.platform,
+              status: 'no_links',
+              search_url: target.url,
+            });
           }
 
 

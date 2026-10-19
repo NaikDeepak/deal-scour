@@ -360,20 +360,20 @@ export default function FindOnShops({
             <div className="space-y-2">
               {noLinkShops.map((shop) => {
                 const shopName = PLATFORM_META[shop.platform]?.name ?? shop.platform
-                if (shop.platform === 'blinkit') {
+                if (shop.platform === 'blinkit' || shop.platform === 'instamart') {
                   return (
                     <div
                       key={shop.platform}
                       className="rounded-xl border border-amber-200 bg-amber-50/70 p-3 text-xs text-amber-900"
                     >
-                      Blinkit: no product links on its search page.{' '}
+                      {shopName}: no product links on its search page.{' '}
                       <a
                         href={shop.search_url}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="font-bold underline decoration-amber-400"
                       >
-                        Open search on Blinkit ↗
+                        Open search on {shopName} ↗
                       </a>
                       , open the right product and paste its link in Prices → Add a product.
                     </div>

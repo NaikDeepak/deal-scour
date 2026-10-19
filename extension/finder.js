@@ -127,6 +127,11 @@ function parseHtmlToDom(html, baseUrl = 'https://www.amazon.in') {
   return root;
 }
 
+function isSponsoredAdAlt(alt) {
+  if (!alt || typeof alt !== 'string') return false;
+  return /\bad\b/i.test(alt);
+}
+
 function isSponsoredElement(el) {
   if (!el || typeof el.getAttribute !== 'function') return false;
   const compType = (el.getAttribute('data-component-type') || '').toLowerCase();
@@ -134,10 +139,57 @@ function isSponsoredElement(el) {
   if (el.getAttribute('data-ad') === 'true') return true;
   const cls = (el.getAttribute('class') || '').toLowerCase();
   if (cls.includes('adholder') || cls.includes('sponsored')) return true;
+  if (el.tagName === 'IMG' && isSponsoredAdAlt(el.getAttribute('alt'))) return true;
+  return false;
+}
+
+function isCardSponsored(card) {
+  if (isSponsoredElement(card)) return true;
+  if (typeof card.querySelectorAll === 'function') {
+    const imgs = card.querySelectorAll('img[alt]');
+    for (const img of imgs) {
+      if (isSponsoredAdAlt(img.getAttribute('alt'))) {
+        return true;
+      }
+    }
+  }
   return false;
 }
 
 function findCardForAnchor(anchor) {
+  const anchorText = anchor.textContent || '';
+  const anchorHasPrice = anchorText.includes('₹');
+
+  if (anchorHasPrice) {
+    if (isCardSponsored(anchor)) {
+      return { card: anchor, sponsored: true };
+    }
+    let curr = anchor.parentElement;
+    while (curr && curr.parentElement) {
+      if (isSponsoredElement(curr)) {
+        return { card: anchor, sponsored: true };
+      }
+      const cls = (curr.getAttribute && curr.getAttribute('class')) || '';
+      const hasCardMarker =
+        (curr.getAttribute &&
+          (curr.getAttribute('data-asin') ||
+            curr.getAttribute('data-id') ||
+            curr.getAttribute('data-component-type') === 's-search-result')) ||
+        /\b(s-result-item|product-card|card|search-card)\b/i.test(cls);
+
+      if (hasCardMarker) {
+        const text = curr.textContent || '';
+        const hasSponsoredBadge = /^\s*sponsored\b/i.test(text);
+        if (hasSponsoredBadge || isSponsoredElement(curr)) {
+          return { card: anchor, sponsored: true };
+        }
+        break;
+      }
+      curr = curr.parentElement;
+    }
+    return { card: anchor, sponsored: false };
+  }
+
   let curr = anchor.parentElement;
   let fallback = curr || anchor;
   while (curr && curr.parentElement) {
@@ -150,16 +202,16 @@ function findCardForAnchor(anchor) {
         (curr.getAttribute('data-asin') ||
           curr.getAttribute('data-id') ||
           curr.getAttribute('data-component-type') === 's-search-result')) ||
-      /\b(s-result-item|product-card|card|search-card)\b/i.test(cls);
+        /\b(s-result-item|product-card|card|search-card)\b/i.test(cls);
 
     if (hasCardMarker) {
       const text = curr.textContent || '';
       const hasSponsoredBadge = /^\s*sponsored\b/i.test(text);
-      return { card: curr, sponsored: hasSponsoredBadge || isSponsoredElement(curr) };
+      return { card: curr, sponsored: hasSponsoredBadge || isCardSponsored(curr) };
     }
     curr = curr.parentElement;
   }
-  return { card: fallback, sponsored: isSponsoredElement(fallback) };
+  return { card: fallback, sponsored: isCardSponsored(fallback) };
 }
 
 function extractPriceFromCard(cardText) {
@@ -234,18 +286,45 @@ function extractCandidates(rootInput) {
       .replace(/\s+/g, ' ')
       .trim();
 
-    // Pick best descriptive title from anchors in this card
-    const meaningfulTexts = entry.texts.filter(
-      (t) => t.length > 3 && !/^(view details|buy now|add)$/i.test(t)
-    );
-    let title = meaningfulTexts[0] || entry.texts[0] || '';
-    if (!title && entry.card && typeof entry.card.querySelectorAll === 'function') {
+    const anchorHasPrice = entry.texts.some((t) => t.includes('₹'));
+    let title = '';
+
+    if (anchorHasPrice && entry.card && typeof entry.card.querySelectorAll === 'function') {
       const imgs = entry.card.querySelectorAll('img[alt]');
-      if (imgs.length > 0) {
-        title = (imgs[0].getAttribute('alt') || '').trim();
+      for (const img of imgs) {
+        const alt = (img.getAttribute('alt') || '').trim();
+        if (alt.length > 3 && !isSponsoredAdAlt(alt) && !alt.includes('₹')) {
+          title = alt;
+          break;
+        }
       }
     }
-    if (!title) continue;
+
+    if (!title) {
+      // Pick best descriptive title from anchors in this card
+      const meaningfulTexts = entry.texts.filter(
+        (t) => t.length > 3 && !/^(view details|buy now|add)$/i.test(t) && !t.includes('₹')
+      );
+      title = meaningfulTexts[0] || '';
+      if (!title) {
+        const candidateText = entry.texts[0] || '';
+        if (!candidateText.includes('₹')) {
+          title = candidateText;
+        }
+      }
+      if (!title && entry.card && typeof entry.card.querySelectorAll === 'function') {
+        const imgs = entry.card.querySelectorAll('img[alt]');
+        for (const img of imgs) {
+          const alt = (img.getAttribute('alt') || '').trim();
+          if (alt.length > 3 && !isSponsoredAdAlt(alt) && !alt.includes('₹')) {
+            title = alt;
+            break;
+          }
+        }
+      }
+    }
+
+    if (!title || title.includes('₹')) continue;
 
     const price_paise = extractPriceFromCard(cardText);
     const pack_label = _lib.parsePackLabel(title) || _lib.parsePackLabel(cardText);
@@ -337,5 +416,7 @@ if (typeof module !== 'undefined' && module.exports) {
     parseHtmlToDom,
     stripTags,
     parsePackLabel: _lib.parsePackLabel,
+    isSponsoredAdAlt,
+    isSponsoredElement,
   };
 }
